@@ -112,11 +112,11 @@ footer.page-note { padding-top: 20px; margin-top: 0; }
 
 /* Descriptions stay in one movable group, including the user's draft. */
 .comparison-container { max-width: 800px; }
-.comparison-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 12px; }
+.comparison-toolbar { display: flex; flex-direction: column; align-items: stretch; gap: 14px; margin-bottom: 12px; }
 .comparison-toolbar h2 { margin-bottom: 6px; }
 .comparison-toolbar p { margin-bottom: 0; font-size: 14px; }
 .comparison-toolbar .btn { flex-shrink: 0; }
-.comparison-toolbar-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.comparison-toolbar-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .comparison-pool-note { font-size: 13px; margin-bottom: 20px; }
 .description-column { display: flex; flex-direction: column; gap: 18px; }
 .description-card {
@@ -177,7 +177,6 @@ footer.page-note { padding-top: 20px; margin-top: 0; }
   header { align-items: flex-start; flex-direction: column; gap: 10px; }
   header nav { gap: 2px; }
   header nav a { padding: 5px 8px; }
-  .comparison-toolbar { flex-direction: column; gap: 14px; }
   .comparison-toolbar-actions { width: 100%; }
   .comparison-toolbar .btn { width: 100%; }
 }

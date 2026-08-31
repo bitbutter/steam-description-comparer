@@ -71,7 +71,7 @@ function isComparisonSampleStructureValid(sample) {
 
 function validateComparisonSampleStructure(sample) {
   if (!isComparisonSampleStructureValid(sample)) {
-    throw new Error("The saved comparison sample is invalid. Choose New sample to replace it.");
+    throw new Error("The saved comparison sample is invalid. Choose Resample Steam games to replace it.");
   }
 }
 
@@ -80,7 +80,7 @@ function getComparisonSample() {
   if (serializedSample === null) return null;
   let sample;
   try { sample = JSON.parse(serializedSample); }
-  catch { throw new Error("The saved comparison sample could not be read. Choose New sample to replace it."); }
+  catch { throw new Error("The saved comparison sample could not be read. Choose Resample Steam games to replace it."); }
   validateComparisonSampleStructure(sample);
   return sample;
 }
@@ -105,14 +105,14 @@ function comparisonGames(catalogue, sample) {
   validateComparisonSampleStructure(sample);
   if (sample.catalogueId !== catalogue.catalogueId) throw new Error("The comparison sample belongs to another catalogue.");
   const genre = catalogue.genres.find(genre => String(genre.id) === sample.genreId);
-  if (!genre) throw new Error("The saved comparison genre is missing from the catalogue. Choose New sample to replace it.");
+  if (!genre) throw new Error("The saved comparison genre is missing from the catalogue. Choose Resample Steam games to replace it.");
   const genreGameIds = new Set(genre.gameIds);
   const gamesById = new Map(catalogue.games.map(game => [game.id, game]));
   return sample.descriptionIds.filter(id => id !== YOUR_DESCRIPTION_ID).map(id => {
     const game = gamesById.get(id);
-    if (!game) throw new Error("The comparison sample contains a game missing from the catalogue. Choose New sample to replace it.");
+    if (!game) throw new Error("The comparison sample contains a game missing from the catalogue. Choose Resample Steam games to replace it.");
     if (!genreGameIds.has(id) || game.reviews < sample.minimumReviewCount) {
-      throw new Error("The comparison sample does not match its saved genre or review minimum. Choose New sample to replace it.");
+      throw new Error("The comparison sample does not match its saved genre or review minimum. Choose Resample Steam games to replace it.");
     }
     return game;
   });

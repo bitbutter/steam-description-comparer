@@ -63,7 +63,7 @@ function browserContext({catalogue = catalogueFixture(), storage = new Map(), fe
   const element = id => {
     if (!elements.has(id)) {
       const created = createElement();
-      created.disabled = ["save-btn", "new-sample-btn"].includes(id);
+      created.disabled = ["save-btn", "resample-steam-games-btn", "copy-all-text-btn", "reveal-information-btn"].includes(id);
       elements.set(id, created);
     }
     return elements.get(id);
@@ -395,7 +395,7 @@ test("requesting a new sample keeps the configured description and writes no ran
   seedComparison(context);
   const beforeReads = storageReads.length;
   const beforeWrites = storageWrites.length;
-  context.onNewSample();
+  context.resampleSteamGames();
   const sample = context.getComparisonSample();
   assert.equal(context.comparisonSampleMatchesSettings(sample, context.getSettings(), catalogueFixture()), true);
   assert.equal(context.getSettings().description, settingsFixture().description);
@@ -547,7 +547,7 @@ test("a settings change during catalogue loading keeps the old draft from overwr
   assert.equal(context.window.location.href, "");
 });
 
-test("same-catalogue corrupt sample references fail visibly and stay saved until explicit New sample", () => {
+test("same-catalogue corrupt sample references fail visibly and stay saved until explicit Resample Steam games", () => {
   for (const mutate of [
     sample => { sample.descriptionIds[0] = "steam_999"; },
     sample => { sample.descriptionIds[0] = "steam_7"; },
@@ -567,9 +567,9 @@ test("same-catalogue corrupt sample references fail visibly and stay saved until
     assert.equal(storageWrites.length, beforeWrites);
     assert.equal(storageDeletes.length, beforeDeletes);
     assert.match(elements.get("status-message").innerHTML, /comparison|sample|genre|minimum/i);
-    assert.match(elements.get("main-area").innerHTML, /New sample/);
+    assert.match(elements.get("main-area").innerHTML, /Resample Steam games/);
     assert.equal(vm.runInContext("currentlyDisplayedComparisonSample", context), null);
-    context.onNewSample();
+    context.resampleSteamGames();
     const replacement = context.getComparisonSample();
     assert.equal(context.comparisonSampleMatchesSettings(replacement, context.getSettings(), catalogueFixture()), true);
     assert.notEqual(storage.get(SAMPLE_KEY), saved);
@@ -689,7 +689,7 @@ test("revealing and hiding information leaves the sample and arrangement untouch
   assert.equal(storageWrites.length, beforeWrites);
 });
 
-test("New sample hides previously revealed information and shuffles the candidate position", () => {
+test("Resample Steam games hides previously revealed information and shuffles the candidate position", () => {
   const browser = browserContext({compare: true, realComparisonRenderer: true});
   const {context, elements} = browser;
   seedComparison(context);
@@ -698,7 +698,7 @@ test("New sample hides previously revealed information and shuffles the candidat
   context.onRevealInformation();
   assert.ok(informationElements.every(element => element.hidden === false));
   vm.runInContext("Math.random = () => 0;", context);
-  context.onNewSample();
+  context.resampleSteamGames();
   assert.equal(context.getComparisonSample().descriptionIds.indexOf(YOUR_DESCRIPTION_ID), 4);
   assert.ok(informationElements.every(element => element.hidden === true));
   assert.equal(elements.get("reveal-information-btn").getAttribute("aria-expanded"), "false");
@@ -741,4 +741,95 @@ test("rearranging descriptions relabels A through E by their new displayed posit
   assert.deepEqual(cards.map(card => card.controls[".move-description-earlier"].disabled), [true, false, false, false, false]);
   assert.deepEqual(cards.map(card => card.controls[".move-description-later"].disabled), [false, false, false, false, true]);
   assert.deepEqual(Array.from(context.getComparisonSample().descriptionIds), arrangedOrder);
+});
+
+
+function displayedCopyFixture(browser) {
+  const descriptions = ["First description & details", "The displayed draft\nwith another paragraph.", "Third <description>", "Fourth description", "Fifth description"];
+  const cards = descriptions.map((text, index) => ({
+    textContent: "Source game title, review count, controls and " + text,
+    querySelector(selector) {
+      if (selector === ".description-card-label") return {textContent: String.fromCharCode(65 + index)};
+      if (selector === ".description-text") return {textContent: text};
+      throw new Error("Copy must not read source information or controls");
+    },
+  }));
+  browser.selectorElements.set("#description-list .description-card", cards);
+  return {cards, expectedText: "A\nFirst description & details\n\nB\nThe displayed draft\nwith another paragraph.\n\nC\nThird <description>\n\nD\nFourth description\n\nE\nFifth description"};
+}
+
+test("copy exports only the displayed A-E descriptions without changing the sample or revealing identities", async () => {
+  for (const revealed of [false, true]) {
+    const browser = browserContext({compare: true});
+    const {context, storage, elements, storageWrites, storageDeletes} = browser;
+    seedComparison(context);
+    context.setComparisonInformationRevealed(revealed);
+    const {expectedText} = displayedCopyFixture(browser);
+    context.setSettings({...settingsFixture(), description: "A newer draft that is not displayed"});
+    const beforeStorage = [...storage];
+    const beforeWrites = storageWrites.length;
+    const beforeDeletes = storageDeletes.length;
+    const copiedTexts = [];
+    context.navigator = {clipboard: {writeText: async text => copiedTexts.push(text)}};
+    await context.copyDisplayedDescriptionsToClipboard();
+    assert.deepEqual(copiedTexts, [expectedText]);
+    assert.deepEqual([...storage], beforeStorage);
+    assert.equal(storageWrites.length, beforeWrites);
+    assert.equal(storageDeletes.length, beforeDeletes);
+    assert.equal(vm.runInContext("comparisonInformationRevealed", context), revealed);
+    assert.match(elements.get("status-message").innerHTML, /Copied all five descriptions/);
+    assert.equal(elements.get("copy-all-text-btn").disabled, false);
+  }
+});
+
+test("copy reports unavailable or blocked clipboard access without claiming success", async () => {
+  for (const navigator of [{}, {clipboard: {writeText: async () => { throw Object.assign(new Error("Denied"), {name: "NotAllowedError"}); }}}]) {
+    const browser = browserContext({compare: true});
+    const {context, elements} = browser;
+    seedComparison(context);
+    displayedCopyFixture(browser);
+    context.navigator = navigator;
+    await context.copyDisplayedDescriptionsToClipboard();
+    assert.match(elements.get("status-message").innerHTML, /unavailable|blocked/);
+    assert.doesNotMatch(elements.get("status-message").innerHTML, /Copied all five/);
+    assert.equal(elements.get("copy-all-text-btn").disabled, false);
+  }
+});
+
+test("copy refuses an incomplete display without writing a partial list", async () => {
+  const browser = browserContext({compare: true});
+  const {context, elements} = browser;
+  seedComparison(context);
+  const {cards} = displayedCopyFixture(browser);
+  cards.pop();
+  let writes = 0;
+  context.navigator = {clipboard: {writeText: async () => { writes++; }}};
+  await context.copyDisplayedDescriptionsToClipboard();
+  assert.equal(writes, 0);
+  assert.match(elements.get("status-message").innerHTML, /All five descriptions must be displayed/);
+});
+
+test("a pending copy prevents duplicates and cannot claim the replacement sample was copied", async () => {
+  const browser = browserContext({compare: true, realComparisonRenderer: true});
+  const {context, elements} = browser;
+  seedComparison(context);
+  context.renderComparisonPage();
+  displayedCopyFixture(browser);
+  let finishCopy;
+  let writes = 0;
+  context.navigator = {clipboard: {writeText: () => {
+    writes++;
+    return new Promise(resolve => { finishCopy = resolve; });
+  }}};
+  const copying = context.copyDisplayedDescriptionsToClipboard();
+  assert.equal(elements.get("copy-all-text-btn").disabled, true);
+  await context.copyDisplayedDescriptionsToClipboard();
+  assert.equal(writes, 1);
+  browser.selectorElements.clear();
+  context.resampleSteamGames();
+  assert.equal(elements.get("copy-all-text-btn").disabled, true);
+  finishCopy();
+  await copying;
+  assert.doesNotMatch(elements.get("status-message").innerHTML, /Copied all five/);
+  assert.equal(elements.get("copy-all-text-btn").disabled, false);
 });

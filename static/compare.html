@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Compare - Steam Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <div class="container comparison-container">
@@ -23,8 +23,9 @@
       <p>Drag descriptions to rearrange them.</p>
     </div>
     <div class="comparison-toolbar-actions">
-      <button id="new-sample-btn" class="btn btn-primary" disabled>New sample</button>
+      <button id="resample-steam-games-btn" class="btn btn-primary" disabled>Resample Steam games</button>
       <button id="reveal-information-btn" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="description-list" disabled>Reveal information</button>
+      <button id="copy-all-text-btn" class="btn btn-secondary" type="button" disabled>Copy all as text</button>
     </div>
   </div>
   <div id="status-message" role="status" aria-live="polite"></div>
@@ -35,12 +36,13 @@
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>.</p></footer>
 </div>
 <script src="vendor/sortable.min.js"></script>
-<script src="script.js?v=7"></script>
+<script src="script.js?v=8"></script>
 <script>
 let comparisonCatalogue = null;
 let currentlyDisplayedComparisonSample = null;
 let descriptionSortable = null;
 let comparisonInformationRevealed = false;
+let comparisonTextCopyInProgress = false;
 
 function showComparisonStatus(message, success = false) {
   const status = document.getElementById("status-message");
@@ -54,6 +56,7 @@ function clearDisplayedDescriptions() {
     descriptionSortable = null;
   }
   currentlyDisplayedComparisonSample = null;
+  document.getElementById("copy-all-text-btn").disabled = true;
   setComparisonInformationRevealed(false);
 }
 
@@ -61,13 +64,14 @@ function showUnavailableComparison(message) {
   clearDisplayedDescriptions();
   document.getElementById("eligible-game-count").textContent = "";
   document.getElementById("main-area").innerHTML = '<div class="empty-state"><h3>No comparison sample to show</h3>' +
-    '<p>Use New sample to try again. You can change the review minimum or genre, or restore excluded games, in <a href="settings.html">Settings</a>.</p></div>';
+    '<p>Use Resample Steam games to try again. You can change the review minimum or genre, or restore excluded games, in <a href="settings.html">Settings</a>.</p></div>';
   showComparisonStatus(message);
 }
 
 async function init() {
-  document.getElementById("new-sample-btn").addEventListener("click", onNewSample);
+  document.getElementById("resample-steam-games-btn").addEventListener("click", resampleSteamGames);
   document.getElementById("reveal-information-btn").addEventListener("click", onRevealInformation);
+  document.getElementById("copy-all-text-btn").addEventListener("click", copyDisplayedDescriptionsToClipboard);
   try {
     comparisonCatalogue = await fetchCatalogue();
     renderComparisonPage();
@@ -97,8 +101,8 @@ function samplesHaveSameDescriptionOrder(firstSample, secondSample) {
 function renderComparisonPage(message = "", revealInformation = false) {
   clearDisplayedDescriptions();
   showComparisonStatus(message);
-  const newSampleButton = document.getElementById("new-sample-btn");
-  newSampleButton.disabled = !comparisonCatalogue;
+  const resampleButton = document.getElementById("resample-steam-games-btn");
+  resampleButton.disabled = !comparisonCatalogue;
   if (!comparisonCatalogue) return;
   try {
     const settings = readUsableComparisonSettings();
@@ -122,6 +126,7 @@ function renderComparisonPage(message = "", revealInformation = false) {
     renderDescriptionCards(descriptions);
     currentlyDisplayedComparisonSample = {...sample, descriptionIds: [...sample.descriptionIds]};
     setComparisonInformationRevealed(revealInformation);
+    document.getElementById("copy-all-text-btn").disabled = comparisonTextCopyInProgress;
   } catch (error) {
     showUnavailableComparison(error.message);
   }
@@ -141,6 +146,41 @@ function setComparisonInformationRevealed(revealed) {
 function onRevealInformation() {
   if (!currentlyDisplayedComparisonSample) return;
   setComparisonInformationRevealed(!comparisonInformationRevealed);
+}
+
+async function copyDisplayedDescriptionsToClipboard() {
+  if (!currentlyDisplayedComparisonSample || comparisonTextCopyInProgress) return;
+  const sampleAtCopy = currentlyDisplayedComparisonSample;
+  const copyButton = document.getElementById("copy-all-text-btn");
+  comparisonTextCopyInProgress = true;
+  copyButton.disabled = true;
+  try {
+    const cards = Array.from(document.querySelectorAll("#description-list .description-card"));
+    if (cards.length !== 5) throw new Error("All five descriptions must be displayed before copying.");
+    const comparisonText = cards.map(card => {
+      const label = card.querySelector(".description-card-label");
+      const description = card.querySelector(".description-text");
+      if (!label || !description || !description.textContent.trim()) {
+        throw new Error("A displayed description is missing. Reload the comparison before copying.");
+      }
+      return label.textContent + "\n" + description.textContent;
+    }).join("\n\n");
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+      throw new Error("Clipboard copying is unavailable in this browser.");
+    }
+    await navigator.clipboard.writeText(comparisonText);
+    if (currentlyDisplayedComparisonSample === sampleAtCopy) {
+      showComparisonStatus("Copied all five descriptions to the clipboard.", true);
+    }
+  } catch (error) {
+    if (currentlyDisplayedComparisonSample === sampleAtCopy) {
+      showComparisonStatus(error.name === "NotAllowedError" ?
+        "Copying was blocked. Allow clipboard access for this page and try again." : error.message);
+    }
+  } finally {
+    comparisonTextCopyInProgress = false;
+    copyButton.disabled = !currentlyDisplayedComparisonSample;
+  }
 }
 
 function renderDescriptionCards(descriptions) {
@@ -229,7 +269,7 @@ function onDescriptionsReordered() {
   }
 }
 
-function onNewSample() {
+function resampleSteamGames() {
   if (!comparisonCatalogue) return;
   try {
     const settings = readUsableComparisonSettings();

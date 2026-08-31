@@ -6,7 +6,7 @@ Put your game description beside four descriptions from Steam games that have fo
 
 The catalogue is a one-time snapshot of 4,213 distinct games, with exactly 600 in each of 15 genres. Every game had at least 50 reviews when collected. Games can appear in more than one genre. Review count is a rough measure of traction; it does not say how good the game or its description is.
 
-Descriptions appear in one column under headings A–E, without marking your draft. **Reveal information** shows Steam titles, review counts, store links and Exclude buttons. Use **Exclude** on a card to replace that game and keep it out of future samples. Exclusions can be restored in Settings. **New sample** draws another set of four games, shuffles all five descriptions and hides their information again. Editing your own description preserves the current Steam cards and their arrangement.
+Descriptions appear in one column under headings A–E, without marking your draft. **Reveal information** shows Steam titles, review counts, store links and Exclude buttons. Use **Exclude** on a card to replace that game and keep it out of future samples. Exclusions can be restored in Settings. **Resample Steam games** draws another set of four games, shuffles all five descriptions and hides their information again. Editing your own description preserves the current Steam cards and their arrangement. **Copy all as text** copies the displayed A–E descriptions in order, without game information.
 
 Your description, card arrangement and exclusions stay in this browser. They are not uploaded or synced across devices; clearing site data removes them. GitHub Pages receives normal page requests and logs visitor IP addresses under its own privacy policy.
 
