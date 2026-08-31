@@ -6,7 +6,7 @@
 <meta name="description" content="Put your game description alongside four Steam descriptions. Filter by genre and review count, rearrange the cards, and exclude familiar games.">
 <title>Steam Description Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <div class="container">
@@ -25,16 +25,12 @@
       <a href="settings.html" class="btn btn-primary btn-block">Start comparing</a>
     </div>
   </div>
-  <p class="page-note">Use New sample for another set of games, or Exclude to keep a game out of future samples. You can restore excluded games in Settings.</p>
-  <p id="catalogue-details" class="page-note"></p>
+  <p class="page-note">Use New sample for another set of games. Reveal information shows the Steam titles, review counts and Exclude buttons. You can restore excluded games in Settings.</p>
   <p class="page-note">Your description and exclusions are stored locally in your browser and aren't uploaded by this tool.</p>
   <p class="page-note">Steam descriptions belong to their respective owners. This tool is not affiliated with Valve or Steam. The website host receives normal page requests.</p>
   <hr class="footer-divider">
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>.</p></footer>
 </div>
-<script src="script.js?v=6"></script>
-<script>
-fetchCatalogue().then(catalogue => { document.getElementById("catalogue-details").textContent = catalogueSummary(catalogue); }).catch(error => { document.getElementById("catalogue-details").textContent = error.message; });
-</script>
+
 </body>
 </html>

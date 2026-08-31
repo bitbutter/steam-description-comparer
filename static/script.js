@@ -130,15 +130,15 @@ function createComparisonSample(catalogue, settings) {
   const games = chooseSteamGames(catalogue, settings.tag, settings.minimumReviewCount);
   return {catalogueId: catalogue.catalogueId, genreId: String(settings.tag),
     minimumReviewCount: settings.minimumReviewCount,
-    descriptionIds: [YOUR_DESCRIPTION_ID, ...games.map(game => game.id)]};
+    descriptionIds: shuffleDescriptions([YOUR_DESCRIPTION_ID, ...games.map(game => game.id)])};
 }
 
-function shuffleSteamGames(games) {
-  for (let index = games.length - 1; index > 0; index--) {
+function shuffleDescriptions(descriptions) {
+  for (let index = descriptions.length - 1; index > 0; index--) {
     const randomIndex = Math.floor(Math.random() * (index + 1));
-    [games[index], games[randomIndex]] = [games[randomIndex], games[index]];
+    [descriptions[index], descriptions[randomIndex]] = [descriptions[randomIndex], descriptions[index]];
   }
-  return games;
+  return descriptions;
 }
 
 function escapeHtml(text) {
@@ -250,7 +250,7 @@ function chooseSteamGames(catalogue, genreId, minimumReviewCount, additionallyEx
   if (eligibleGames.length < sampleSize) {
     throw new Error("Too few eligible games remain for a complete comparison. Lower the review minimum, choose another genre, or restore excluded games in Settings.");
   }
-  return shuffleSteamGames(eligibleGames).slice(0, sampleSize).map(game => ({...game, steamTagIds: [...game.steamTagIds]}));
+  return shuffleDescriptions(eligibleGames).slice(0, sampleSize).map(game => ({...game, steamTagIds: [...game.steamTagIds]}));
 }
 
 function steamSourceMarkup(game) {
@@ -258,10 +258,4 @@ function steamSourceMarkup(game) {
       typeof game.name !== "string" || !game.name.trim()) throw new Error("The Steam game source is invalid.");
   const steamUrl = "https://store.steampowered.com/app/" + game.id.slice(6) + "/";
   return '<a href="' + steamUrl + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(game.name) + '</a>';
-}
-
-function catalogueSummary(catalogue) {
-  return catalogue.games.length.toLocaleString() + " games across " + catalogue.genres.length +
-    " genres. Collected " + new Date(catalogue.collectedAt).toLocaleDateString() +
-    ". Every game had at least " + catalogue.minimumReviewCount.toLocaleString() + " qualifying reviews.";
 }

@@ -43,9 +43,13 @@ function browserContext({catalogue = catalogueFixture(), storage = new Map(), fe
   const storageReads = [];
   const storageWrites = [];
   const storageDeletes = [];
+  const selectorElements = new Map();
+  const selectElements = selector => selector.split(",").flatMap(part => selectorElements.get(part.trim()) || []);
   const createElement = () => ({
     innerHTML: "", textContent: "", disabled: false, hidden: false, value: "",
-    listeners: new Map(),
+    listeners: new Map(), attributes: new Map(),
+    setAttribute(name, value) { this.attributes.set(name, String(value)); },
+    getAttribute(name) { return this.attributes.get(name) ?? null; },
     get valueAsNumber() { return this.value === "" ? NaN : Number(this.value); },
     addEventListener(event, callback) {
       const callbacks = this.listeners.get(event) || [];
@@ -54,7 +58,7 @@ function browserContext({catalogue = catalogueFixture(), storage = new Map(), fe
     },
     appendChild(child) { if (child.selected) this.value = String(child.value); },
     click() { if (!this.disabled) for (const callback of this.listeners.get("click") || []) callback(); },
-    querySelectorAll() { return []; },
+    querySelectorAll: selectElements,
   });
   const element = id => {
     if (!elements.has(id)) {
@@ -74,7 +78,7 @@ function browserContext({catalogue = catalogueFixture(), storage = new Map(), fe
       fetchUrls.push(url);
       return fetchResponse ? fetchResponse() : {ok: true, json: async () => catalogue};
     },
-    document: {getElementById: element, querySelectorAll: () => [], createElement},
+    document: {getElementById: element, querySelectorAll: selectElements, createElement},
     window: {location: {href: ""}, addEventListener: (event, callback) => { if (event === "storage") storageListeners.push(callback); }},
     Sortable: function () { this.destroy = () => {}; },
     setTimeout, clearTimeout, console,
@@ -87,7 +91,7 @@ function browserContext({catalogue = catalogueFixture(), storage = new Map(), fe
     context.fixtureCatalogue = catalogue;
     vm.runInContext("comparisonCatalogue = fixtureCatalogue;", context);
     if (!realComparisonRenderer) {
-      vm.runInContext("renderComparisonPage = message => { globalThis.lastRenderMessage = message; };", context);
+      vm.runInContext("renderComparisonPage = (message, revealed = false) => { globalThis.lastRenderMessage = message; globalThis.lastRenderRevealed = revealed; };", context);
     }
   }
   if (settings) {
@@ -95,7 +99,7 @@ function browserContext({catalogue = catalogueFixture(), storage = new Map(), fe
       .match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/init\(\);\s*$/, "");
     vm.runInContext(settingsInlineScript, context);
   }
-  return {context, storage, fetchUrls, elements, storageListeners, storageReads, storageWrites, storageDeletes};
+  return {context, storage, fetchUrls, elements, storageListeners, storageReads, storageWrites, storageDeletes, selectorElements};
 }
 
 function seedComparison(context, sample = sampleFixture()) {
@@ -532,7 +536,8 @@ test("a settings change during catalogue loading keeps the old draft from overwr
   for (const listener of storageListeners) listener({key: SETTINGS_KEY});
   releaseResponse({ok: true, json: async () => catalogueFixture()});
   await initialization;
-  assert.match(elements.get("catalogue-details").textContent, /8 games across 2 genres/);
+  assert.match(elements.get("eligible-game-count").textContent, /6 games match this minimum and your exclusions/);
+  assert.match(elements.get("excluded-games-list").innerHTML, /No games excluded/);
   assert.equal(elements.get("tag").value, "1");
   assert.equal(elements.get("save-btn").disabled, true);
   assert.match(elements.get("status-message").innerHTML, /Settings changed in another tab/);
@@ -619,4 +624,121 @@ test("previously saved minima below fifty stay editable but cannot be used until
       assert.equal(context.window.location.href, "compare.html");
     }
   }
+});
+
+
+test("new samples can place the candidate in any of the five positions", () => {
+  const observedPositions = new Set();
+  for (const randomValue of [0, 0.2, 0.333, 0.4, 0.9]) {
+    const {context} = browserContext();
+    context.fixtureRandomValue = randomValue;
+    vm.runInContext("Math.random = () => fixtureRandomValue;", context);
+    const sample = context.createComparisonSample(catalogueFixture(), settingsFixture());
+    observedPositions.add(sample.descriptionIds.indexOf(YOUR_DESCRIPTION_ID));
+    assert.equal(sample.descriptionIds.length, 5);
+    assert.equal(new Set(sample.descriptionIds).size, 5);
+    assert.ok(sample.descriptionIds.every(id => id === YOUR_DESCRIPTION_ID || catalogueFixture().genres[0].gameIds.includes(id)));
+  }
+  assert.deepEqual([...observedPositions].sort(), [0, 1, 2, 3, 4]);
+});
+
+function comparisonInformationElements(browser) {
+  const sourceInformation = Array.from({length: 4}, () => ({hidden: true}));
+  const exclusionButtons = Array.from({length: 4}, () => ({hidden: true, addEventListener() {}}));
+  browser.selectorElements.set(".steam-game-information", sourceInformation);
+  browser.selectorElements.set(".exclude-game-btn", exclusionButtons);
+  return [...sourceInformation, ...exclusionButtons];
+}
+
+test("comparison cards use only letter headings and keep source information hidden initially", () => {
+  const {context, elements} = browserContext({compare: true, realComparisonRenderer: true});
+  seedComparison(context);
+  context.renderComparisonPage();
+  const markup = elements.get("main-area").innerHTML;
+  const cards = [...markup.matchAll(/<article class="([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)];
+  assert.equal(cards.length, 5);
+  assert.ok(cards.every(card => card[1] === "description-card"));
+  const headings = cards.map(card => [...card[2].matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>/g)].map(match => match[1]));
+  assert.deepEqual(headings, [["A"], ["B"], ["C"], ["D"], ["E"]]);
+  assert.doesNotMatch(markup, /Your description|Your current draft|own-description-card|Edit description|description-edit-link/);
+  assert.equal([...markup.matchAll(/<div[^>]*class="steam-game-information"[^>]*\bhidden\b/g)].length, 4);
+  assert.equal([...markup.matchAll(/<button[^>]*class="[^"]*exclude-game-btn[^"]*"[^>]*\bhidden\b/g)].length, 4);
+  assert.equal(elements.get("reveal-information-btn").getAttribute("aria-expanded"), "false");
+});
+
+test("revealing and hiding information leaves the sample and arrangement untouched", () => {
+  const browser = browserContext({compare: true});
+  const {context, storage, storageWrites} = browser;
+  seedComparison(context);
+  const informationElements = comparisonInformationElements(browser);
+  context.setComparisonInformationRevealed(false);
+  const savedSample = storage.get(SAMPLE_KEY);
+  const beforeWrites = storageWrites.length;
+  context.onRevealInformation();
+  assert.ok(informationElements.every(element => element.hidden === false));
+  assert.equal(browser.elements.get("reveal-information-btn").getAttribute("aria-expanded"), "true");
+  assert.equal(browser.elements.get("reveal-information-btn").textContent, "Hide information");
+  assert.equal(storage.get(SAMPLE_KEY), savedSample);
+  assert.equal(storageWrites.length, beforeWrites);
+  assert.equal(context.lastRenderMessage, undefined);
+  context.onRevealInformation();
+  assert.ok(informationElements.every(element => element.hidden === true));
+  assert.equal(browser.elements.get("reveal-information-btn").getAttribute("aria-expanded"), "false");
+  assert.equal(browser.elements.get("reveal-information-btn").textContent, "Reveal information");
+  assert.equal(storage.get(SAMPLE_KEY), savedSample);
+  assert.equal(storageWrites.length, beforeWrites);
+});
+
+test("New sample hides previously revealed information and shuffles the candidate position", () => {
+  const browser = browserContext({compare: true, realComparisonRenderer: true});
+  const {context, elements} = browser;
+  seedComparison(context);
+  const informationElements = comparisonInformationElements(browser);
+  context.renderComparisonPage();
+  context.onRevealInformation();
+  assert.ok(informationElements.every(element => element.hidden === false));
+  vm.runInContext("Math.random = () => 0;", context);
+  context.onNewSample();
+  assert.equal(context.getComparisonSample().descriptionIds.indexOf(YOUR_DESCRIPTION_ID), 4);
+  assert.ok(informationElements.every(element => element.hidden === true));
+  assert.equal(elements.get("reveal-information-btn").getAttribute("aria-expanded"), "false");
+  assert.equal(vm.runInContext("comparisonInformationRevealed", context), false);
+});
+
+test("excluding a revealed Steam game keeps information revealed for its replacement", () => {
+  const browser = browserContext({compare: true, realComparisonRenderer: true});
+  const {context, elements} = browser;
+  const originalSample = seedComparison(context);
+  const informationElements = comparisonInformationElements(browser);
+  context.renderComparisonPage();
+  context.onRevealInformation();
+  context.onExcludeGame("steam_1");
+  const updatedSample = context.getComparisonSample();
+  assert.ok(!updatedSample.descriptionIds.includes("steam_1"));
+  for (const index of [0, 1, 3, 4]) assert.equal(updatedSample.descriptionIds[index], originalSample.descriptionIds[index]);
+  assert.ok(informationElements.every(element => element.hidden === false));
+  assert.equal(elements.get("reveal-information-btn").getAttribute("aria-expanded"), "true");
+  assert.equal(vm.runInContext("comparisonInformationRevealed", context), true);
+});
+
+test("rearranging descriptions relabels A through E by their new displayed positions", () => {
+  const browser = browserContext({compare: true});
+  const {context, selectorElements} = browser;
+  seedComparison(context);
+  const arrangedOrder = ["steam_4", "steam_2", "steam_1", YOUR_DESCRIPTION_ID, "steam_3"];
+  const cards = arrangedOrder.map(id => {
+    const controls = {
+      ".description-card-label": {textContent: "Previous label"},
+      ".move-description-earlier": {disabled: false, setAttribute() {}},
+      ".move-description-later": {disabled: false, setAttribute() {}},
+    };
+    return {id, controls, querySelector: selector => controls[selector]};
+  });
+  selectorElements.set("#description-list .description-card", cards);
+  setDraggedOrder(context, arrangedOrder);
+  context.onDescriptionsReordered();
+  assert.deepEqual(cards.map(card => card.controls[".description-card-label"].textContent), ["A", "B", "C", "D", "E"]);
+  assert.deepEqual(cards.map(card => card.controls[".move-description-earlier"].disabled), [true, false, false, false, false]);
+  assert.deepEqual(cards.map(card => card.controls[".move-description-later"].disabled), [false, false, false, false, true]);
+  assert.deepEqual(Array.from(context.getComparisonSample().descriptionIds), arrangedOrder);
 });

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Compare - Steam Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <div class="container comparison-container">
@@ -22,22 +22,25 @@
       <h2>Compare descriptions</h2>
       <p>Drag descriptions to rearrange them.</p>
     </div>
-    <button id="new-sample-btn" class="btn btn-primary" disabled>New sample</button>
+    <div class="comparison-toolbar-actions">
+      <button id="new-sample-btn" class="btn btn-primary" disabled>New sample</button>
+      <button id="reveal-information-btn" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="description-list" disabled>Reveal information</button>
+    </div>
   </div>
   <div id="status-message" role="status" aria-live="polite"></div>
   <p id="eligible-game-count" class="comparison-pool-note"></p>
   <main id="main-area"><p>Loading the game catalogue…</p></main>
-  <p id="catalogue-details" class="page-note"></p>
   <p class="page-note">Your description, arrangement, and exclusions are stored in your browser and aren't uploaded by this tool. Clearing site data removes them.</p>
   <hr class="footer-divider">
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>.</p></footer>
 </div>
 <script src="vendor/sortable.min.js"></script>
-<script src="script.js?v=6"></script>
+<script src="script.js?v=7"></script>
 <script>
 let comparisonCatalogue = null;
 let currentlyDisplayedComparisonSample = null;
 let descriptionSortable = null;
+let comparisonInformationRevealed = false;
 
 function showComparisonStatus(message, success = false) {
   const status = document.getElementById("status-message");
@@ -51,6 +54,7 @@ function clearDisplayedDescriptions() {
     descriptionSortable = null;
   }
   currentlyDisplayedComparisonSample = null;
+  setComparisonInformationRevealed(false);
 }
 
 function showUnavailableComparison(message) {
@@ -63,9 +67,9 @@ function showUnavailableComparison(message) {
 
 async function init() {
   document.getElementById("new-sample-btn").addEventListener("click", onNewSample);
+  document.getElementById("reveal-information-btn").addEventListener("click", onRevealInformation);
   try {
     comparisonCatalogue = await fetchCatalogue();
-    document.getElementById("catalogue-details").textContent = catalogueSummary(comparisonCatalogue);
     renderComparisonPage();
   } catch (error) {
     showUnavailableComparison(error.message);
@@ -90,7 +94,7 @@ function samplesHaveSameDescriptionOrder(firstSample, secondSample) {
     firstSample.descriptionIds.every((id, index) => id === secondSample.descriptionIds[index]));
 }
 
-function renderComparisonPage(message = "") {
+function renderComparisonPage(message = "", revealInformation = false) {
   clearDisplayedDescriptions();
   showComparisonStatus(message);
   const newSampleButton = document.getElementById("new-sample-btn");
@@ -117,28 +121,47 @@ function renderComparisonPage(message = "") {
       eligibleCount.toLocaleString() + " games match your settings and exclusions";
     renderDescriptionCards(descriptions);
     currentlyDisplayedComparisonSample = {...sample, descriptionIds: [...sample.descriptionIds]};
+    setComparisonInformationRevealed(revealInformation);
   } catch (error) {
     showUnavailableComparison(error.message);
   }
 }
 
+function setComparisonInformationRevealed(revealed) {
+  comparisonInformationRevealed = revealed && Boolean(currentlyDisplayedComparisonSample);
+  const button = document.getElementById("reveal-information-btn");
+  button.disabled = !currentlyDisplayedComparisonSample;
+  button.textContent = comparisonInformationRevealed ? "Hide information" : "Reveal information";
+  button.setAttribute("aria-expanded", String(comparisonInformationRevealed));
+  document.querySelectorAll(".steam-game-information, .exclude-game-btn").forEach(element => {
+    element.hidden = !comparisonInformationRevealed;
+  });
+}
+
+function onRevealInformation() {
+  if (!currentlyDisplayedComparisonSample) return;
+  setComparisonInformationRevealed(!comparisonInformationRevealed);
+}
+
 function renderDescriptionCards(descriptions) {
-  let html = '<div id="description-list" class="description-grid" aria-label="Descriptions to compare">';
-  for (const description of descriptions) {
-    const isOwnDescription = description.id === YOUR_DESCRIPTION_ID;
-    html += '<article class="description-card' + (isOwnDescription ? ' own-description-card' : '') +
-      '" data-id="' + escapeHtml(description.id) + '">';
-    html += '<div class="description-card-heading"><span class="description-drag-handle" aria-hidden="true" title="Drag to rearrange">&#x2630;</span><div>';
-    html += isOwnDescription ? '<h3>Your description</h3><p class="description-source">Your current draft</p>' :
-      '<h3>' + steamSourceMarkup(description) + '</h3><p class="description-source">' +
-      description.reviews.toLocaleString() + ' reviews when collected</p>';
-    html += '</div></div><p class="description-text">' + escapeHtml(description.text) + '</p>';
+  let html = '<div id="description-list" class="description-column" aria-label="Descriptions to compare">';
+  for (const [index, description] of descriptions.entries()) {
+    html += '<article class="description-card" data-id="' + escapeHtml(description.id) + '">';
+    html += '<div class="description-card-heading"><span class="description-drag-handle" aria-hidden="true" title="Drag to rearrange">&#x2630;</span>' +
+      '<h3 class="description-card-label">' + String.fromCharCode(65 + index) + '</h3></div>';
+    html += '<p class="description-text">' + escapeHtml(description.text) + '</p>';
+    if (description.id !== YOUR_DESCRIPTION_ID) {
+      html += '<div class="steam-game-information" hidden><p class="description-game-title">' +
+        steamSourceMarkup(description) + '</p><p class="description-source">' +
+        description.reviews.toLocaleString() + ' reviews when collected</p></div>';
+    }
     html += '<div class="description-card-actions"><div class="description-move-controls">' +
-      '<button class="move-description-earlier" type="button" aria-label="Move description earlier" title="Move earlier">←</button>' +
-      '<button class="move-description-later" type="button" aria-label="Move description later" title="Move later">→</button></div>';
-    html += isOwnDescription ? '<a class="description-edit-link" href="settings.html">Edit description</a>' :
-      '<button class="btn btn-secondary exclude-game-btn" type="button" data-game-id="' + escapeHtml(description.id) +
-      '">Exclude</button>';
+      '<button class="move-description-earlier" type="button" aria-label="Move description up" title="Move up">↑</button>' +
+      '<button class="move-description-later" type="button" aria-label="Move description down" title="Move down">↓</button></div>';
+    if (description.id !== YOUR_DESCRIPTION_ID) {
+      html += '<button class="btn btn-secondary exclude-game-btn" type="button" data-game-id="' + escapeHtml(description.id) +
+        '" hidden>Exclude</button>';
+    }
     html += '</div></article>';
   }
   document.getElementById("main-area").innerHTML = html + '</div>';
@@ -173,6 +196,7 @@ function renderDescriptionCards(descriptions) {
 
 function refreshDescriptionMoveButtons() {
   document.querySelectorAll("#description-list .description-card").forEach((card, index, cards) => {
+    card.querySelector(".description-card-label").textContent = String.fromCharCode(65 + index);
     card.querySelector(".move-description-earlier").disabled = index === 0;
     card.querySelector(".move-description-later").disabled = index === cards.length - 1;
   });
@@ -240,7 +264,7 @@ function onExcludeGame(gameId) {
     const updatedSample = {...savedSample,
       descriptionIds: savedSample.descriptionIds.map(id => id === gameId ? replacement.id : id)};
     saveComparisonSample(updatedSample);
-    renderComparisonPage("Game excluded and replaced. You can restore it in Settings.");
+    renderComparisonPage("Game excluded and replaced. You can restore it in Settings.", comparisonInformationRevealed);
   } catch (error) {
     if (exclusionSaved) clearComparisonSample();
     showUnavailableComparison((exclusionSaved ? "The game is excluded. " : "") + error.message);

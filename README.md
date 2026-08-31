@@ -6,7 +6,7 @@ Put your game description beside four descriptions from Steam games that have fo
 
 The catalogue is a one-time snapshot of 4,213 distinct games, with exactly 600 in each of 15 genres. Every game had at least 50 reviews when collected. Games can appear in more than one genre. Review count is a rough measure of traction; it does not say how good the game or its description is.
 
-Each Steam card shows its title, review count and store link. Use **Exclude** on a card to replace that game and keep it out of future samples. Exclusions can be restored in Settings. **New sample** draws another set of four games. Editing your own description preserves the current Steam cards and their arrangement.
+Descriptions appear in one column under headings A–E, without marking your draft. **Reveal information** shows Steam titles, review counts, store links and Exclude buttons. Use **Exclude** on a card to replace that game and keep it out of future samples. Exclusions can be restored in Settings. **New sample** draws another set of four games, shuffles all five descriptions and hides their information again. Editing your own description preserves the current Steam cards and their arrangement.
 
 Your description, card arrangement and exclusions stay in this browser. They are not uploaded or synced across devices; clearing site data removes them. GitHub Pages receives normal page requests and logs visitor IP addresses under its own privacy policy.
 
@@ -16,7 +16,7 @@ The collector resolves genres against Steam's public tag list and reads English 
 
 Candidates come from Steam's tag search in relevance order. Each game counts towards all of its verified genres. A fixed random seed selects 600 qualifying games per genre from the collected pool. This is a fixed comparison pool, not a representative sample of every game on Steam. The browser draws randomly from that pool after applying your review minimum and exclusions. Raising the minimum can leave fewer than four eligible games; the tool reports that without lowering the requirement.
 
-There are no scheduled refreshes or live Steam calls from the website. The collection date and actual counts appear in the tool. Some game names within the saved descriptions are blanked out; the source title remains visible on each card.
+There are no scheduled refreshes or live Steam calls from the website. The collection metadata is saved in the catalogue. Some game names within the saved descriptions are blanked out; source titles are available through Reveal information.
 
 Game descriptions and titles belong to their respective creators. Source Steam store links are included in the catalogue. This project is not affiliated with Valve. SortableJS is bundled under its [MIT licence](static/vendor/sortable.LICENSE.txt).
 
