@@ -93,7 +93,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .status-info { background: rgba(74, 158, 255, .1); color: var(--accent); border: 1px solid rgba(74, 158, 255, .2); }
 .page-note { font-size: 13px; margin-top: 20px; overflow-wrap: anywhere; }
 .page-note:empty { display: none; }
-footer.page-note { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 28px; }
+.footer-divider { border: 0; border-top: 1px solid var(--border); margin-top: 28px; }
+footer.page-note { padding-top: 20px; margin-top: 0; }
 
 .hero { text-align: center; padding: 40px 16px; }
 .hero h2 { font-size: 28px; margin-bottom: 12px; }

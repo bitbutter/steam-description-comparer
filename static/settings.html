@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Settings - Steam Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <div class="container">
@@ -25,22 +25,23 @@
   </div>
   <div class="form-group">
     <label for="minimum-review-count">Minimum Steam reviews</label>
-    <p>Review count is a proxy for audience size, not review score. Counts include positive and negative Steam-purchase reviews in all languages, excluding off-topic activity. Set 0 to use every eligible game in the catalogue; the catalogue itself only contains games with at least 50 reviews.</p>
+    <p>Set 0 to use every eligible game in the catalogue.</p>
     <input id="minimum-review-count" type="number" min="0" step="1" value="50" required>
     <p id="eligible-game-count" class="page-note" aria-live="polite"></p>
   </div>
   <div class="actions"><button id="save-btn" class="btn btn-primary btn-block" disabled>Compare descriptions</button></div>
   <section class="settings-section" aria-labelledby="exclusions-heading">
     <h2 id="exclusions-heading">Excluded games</h2>
-    <p>Exclude a Steam game directly from its card on Compare. It stays out of future samples in this browser until you restore it here.</p>
+    <p>Exclude a Steam game directly from its card on Compare screen. It stays out of future samples in this browser until you restore it here.</p>
     <div id="excluded-games-list"></div>
   </section>
   <p id="catalogue-details" class="page-note"></p>
   <p class="page-note">Your description and exclusions are stored locally in your browser and aren't uploaded by this tool. Clearing site data removes them.</p>
   <p class="page-note">This site serves a fixed catalogue, not live Steam data. Steam descriptions belong to their respective owners. This tool is not affiliated with Valve or Steam. The website host receives normal page requests.</p>
+  <hr class="footer-divider">
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>.</p></footer>
 </div>
-<script src="script.js?v=5"></script>
+<script src="script.js?v=6"></script>
 <script>
 let settingsCatalogue = null;
 let settingsChangedInAnotherTab = false;
@@ -105,7 +106,7 @@ async function init() {
   const saveButton = document.getElementById("save-btn");
   let saved;
   try {
-    saved = getSettings();
+    saved = readComparisonSettingsForEditing();
     if (saved) {
       descriptionElement.value = saved.description;
       minimumElement.value = saved.minimumReviewCount;
@@ -138,7 +139,7 @@ async function init() {
       if (!tag) throw new Error("Please select a genre tag.");
       const minimumReviewCount = minimumElement.valueAsNumber;
       validateMinimumReviewCount(minimumReviewCount);
-      const previousSettings = getSettings();
+      const previousSettings = readComparisonSettingsForEditing();
       const nextSettings = { description, tag, minimumReviewCount };
       const filtersChanged = !previousSettings || String(previousSettings.tag) !== String(tag) || previousSettings.minimumReviewCount !== minimumReviewCount;
       const eligibleCount = getEligibleGames(settingsCatalogue, tag, minimumReviewCount).length;

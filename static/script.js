@@ -6,29 +6,47 @@ const YOUR_DESCRIPTION_ID = "your-description";
 const REVIEW_COUNT_SCOPE = "Steam purchases, all languages, positive and negative, excluding off-topic activity";
 let catalogueRequest = null;
 
+function isMinimumReviewCountAllowed(minimumReviewCount) {
+  return Number.isSafeInteger(minimumReviewCount) &&
+    (minimumReviewCount === 0 || minimumReviewCount >= 50);
+}
+
 function validateMinimumReviewCount(minimumReviewCount) {
-  if (!Number.isSafeInteger(minimumReviewCount) || minimumReviewCount < 0) {
-    throw new Error("Minimum Steam reviews must be a whole number of 0 or more.");
+  if (!isMinimumReviewCountAllowed(minimumReviewCount)) {
+    throw new Error("Minimum Steam reviews must be 0 or a whole number of 50 or more.");
   }
 }
 
-function validateComparisonSettings(settings) {
+function validateSavedSettingsStructure(settings) {
   if (!settings || typeof settings !== "object" || Array.isArray(settings) ||
       typeof settings.description !== "string" || !settings.description.trim() ||
       !["string", "number"].includes(typeof settings.tag) ||
       !/^[1-9][0-9]*$/.test(String(settings.tag)) || !Number.isSafeInteger(Number(settings.tag))) {
     throw new Error("The saved description or genre is invalid. Check your settings.");
   }
+  if (!Number.isSafeInteger(settings.minimumReviewCount) || settings.minimumReviewCount < 0) {
+    throw new Error("The saved review minimum is invalid. Settings have not been changed.");
+  }
+}
+
+function validateComparisonSettings(settings) {
+  validateSavedSettingsStructure(settings);
   validateMinimumReviewCount(settings.minimumReviewCount);
 }
 
-function getSettings() {
+function readComparisonSettingsForEditing() {
   const serializedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
   if (serializedSettings === null) return null;
   let settings;
   try { settings = JSON.parse(serializedSettings); }
   catch { throw new Error("Saved settings could not be read. They have not been changed."); }
-  validateComparisonSettings(settings);
+  validateSavedSettingsStructure(settings);
+  return settings;
+}
+
+function getSettings() {
+  const settings = readComparisonSettingsForEditing();
+  if (settings) validateComparisonSettings(settings);
   return settings;
 }
 
@@ -43,7 +61,7 @@ function isComparisonSampleStructureValid(sample) {
     typeof sample.catalogueId === "string" && sample.catalogueId.trim() &&
     typeof sample.genreId === "string" && /^[1-9][0-9]*$/.test(sample.genreId) &&
     Number.isSafeInteger(Number(sample.genreId)) &&
-    Number.isSafeInteger(sample.minimumReviewCount) && sample.minimumReviewCount >= 0 &&
+    isMinimumReviewCountAllowed(sample.minimumReviewCount) &&
     Array.isArray(sample.descriptionIds) && sample.descriptionIds.length === 5 &&
     new Set(sample.descriptionIds).size === 5 &&
     sample.descriptionIds.filter(id => id === YOUR_DESCRIPTION_ID).length === 1 &&
