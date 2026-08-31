@@ -122,16 +122,16 @@ test("the catalogue is fetched once with a project-relative URL", async () => {
   assert.deepEqual(fetchUrls, ["catalogue.json"]);
 });
 
-test("genre selection, higher minimums, zero, and unique descriptions use the saved catalogue", async () => {
+test("genre selection, valid review minimums, and unique descriptions use the saved catalogue", async () => {
   const {context} = browserContext();
   const catalogue = await context.fetchCatalogue();
   const filtered = context.chooseSteamGames(catalogue, 1, 100);
   assert.equal(filtered.length, 4);
   assert.equal(new Set(filtered.map(game => game.id)).size, 4);
   assert.ok(filtered.every(game => game.reviews >= 100 && game.steamTagIds.includes(19)));
-  assert.equal(context.getEligibleGames(catalogue, 1, 0).length, 6);
+  assert.equal(context.getEligibleGames(catalogue, 1, 50).length, 6);
   assert.throws(() => context.getEligibleGames(catalogue, 999, 50), /selected genre/);
-  for (const minimum of [-1, 0.5, 1, 25, 49, 49.5, "50", true, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+  for (const minimum of [-1, 0, 0.5, 1, 25, 49, 49.5, 50.5, "50", true, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => context.validateMinimumReviewCount(minimum), /whole number/);
   }
 });
@@ -191,7 +191,7 @@ test("the candidate cannot be excluded and damaged exclusion storage fails expli
   assert.throws(() => context.excludeSteamGame(YOUR_DESCRIPTION_ID, catalogueFixture()), /Only a Steam game/);
   for (const serialized of ['', '["your-description"]', '["steam_1","steam_1"]', 'null', 'not-json']) {
     storage.set(EXCLUSIONS_KEY, serialized);
-    assert.throws(() => context.chooseSteamGames(catalogueFixture(), 1, 0), /excluded games list/);
+    assert.throws(() => context.chooseSteamGames(catalogueFixture(), 1, 50), /excluded games list/);
     assert.equal(storage.get(EXCLUSIONS_KEY), serialized);
   }
 });
@@ -204,7 +204,7 @@ test("underfilled pools never weaken the review minimum or restore excluded game
   assert.throws(() => context.createComparisonSample(catalogue, settingsFixture()), /restore excluded games/);
   assert.deepEqual(plain(context.getExcludedGameIds()), ["steam_1", "steam_2", "steam_3"]);
   for (const sampleSize of [0, 5, 1.5]) {
-    assert.throws(() => context.chooseSteamGames(catalogue, 1, 0, [], sampleSize), /one and four/);
+    assert.throws(() => context.chooseSteamGames(catalogue, 1, 50, [], sampleSize), /one and four/);
   }
 });
 
@@ -578,9 +578,9 @@ test("same-catalogue corrupt sample references fail visibly and stay saved until
 });
 
 
-test("review minima must be zero or at least fifty across settings, sampling and saved comparisons", () => {
+test("review minima must be safe whole integers of at least fifty across settings, sampling and saved comparisons", () => {
   const {context, storage} = browserContext();
-  for (const minimum of [0, 50, 51, 100]) {
+  for (const minimum of [50, 51, 100, Number.MAX_SAFE_INTEGER]) {
     context.setSettings({...settingsFixture(), minimumReviewCount: minimum});
     context.saveComparisonSample({...sampleFixture(), minimumReviewCount: minimum});
     assert.equal(context.getSettings().minimumReviewCount, minimum);
@@ -588,10 +588,10 @@ test("review minima must be zero or at least fifty across settings, sampling and
   }
   const savedSettings = storage.get(SETTINGS_KEY);
   const savedSample = storage.get(SAMPLE_KEY);
-  for (const minimum of [1, 25, 49]) {
-    assert.throws(() => context.setSettings({...settingsFixture(), minimumReviewCount: minimum}), /50 or more/);
-    assert.throws(() => context.getEligibleGames(catalogueFixture(), 1, minimum), /50 or more/);
-    assert.throws(() => context.createComparisonSample(catalogueFixture(), {...settingsFixture(), minimumReviewCount: minimum}), /50 or more/);
+  for (const minimum of [0, 1, 25, 49, 50.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => context.setSettings({...settingsFixture(), minimumReviewCount: minimum}), /review minimum is invalid|50 or higher/);
+    assert.throws(() => context.getEligibleGames(catalogueFixture(), 1, minimum), /50 or higher/);
+    assert.throws(() => context.createComparisonSample(catalogueFixture(), {...settingsFixture(), minimumReviewCount: minimum}), /review minimum is invalid|50 or higher/);
     assert.throws(() => context.saveComparisonSample({...sampleFixture(), minimumReviewCount: minimum}), /sample is invalid/);
     assert.equal(storage.get(SETTINGS_KEY), savedSettings);
     assert.equal(storage.get(SAMPLE_KEY), savedSample);
@@ -599,28 +599,48 @@ test("review minima must be zero or at least fifty across settings, sampling and
 });
 
 test("previously saved minima below fifty stay editable but cannot be used until corrected", async () => {
-  for (const minimum of [1, 49]) {
-    for (const correctedMinimum of [0, 50]) {
+  for (const minimum of [0, 1, 49]) {
+    for (const correctedMinimum of [50, 75]) {
       const previousSettings = {...settingsFixture(), minimumReviewCount: minimum};
       const previousSample = {...sampleFixture(), minimumReviewCount: minimum};
-      const storage = new Map([[SETTINGS_KEY, JSON.stringify(previousSettings)], [SAMPLE_KEY, JSON.stringify(previousSample)]]);
-      const {context, elements, storageWrites} = browserContext({settings: true, storage});
+      const excludedGameIds = ["steam_6"];
+      const storage = new Map([
+        [SETTINGS_KEY, JSON.stringify(previousSettings)],
+        [SAMPLE_KEY, JSON.stringify(previousSample)],
+        [EXCLUSIONS_KEY, JSON.stringify(excludedGameIds)],
+      ]);
+      const previousStorage = [...storage];
+      const {context, elements, storageWrites, storageDeletes} = browserContext({settings: true, storage});
       await context.init();
       assert.equal(elements.get("description").value, previousSettings.description);
       assert.equal(elements.get("minimum-review-count").valueAsNumber, minimum);
       assert.equal(elements.get("save-btn").disabled, false);
-      assert.match(elements.get("eligible-game-count").textContent, /50 or more/);
-      assert.throws(() => context.getSettings(), /50 or more/);
+      assert.match(elements.get("eligible-game-count").textContent, /50 or higher/);
+      assert.throws(() => context.getSettings(), /50 or higher/);
       assert.throws(() => context.getComparisonSample(), /sample is invalid/);
+      assert.deepEqual([...storage], previousStorage);
       assert.equal(storageWrites.length, 0);
+      assert.equal(storageDeletes.length, 0);
       elements.get("save-btn").click();
+      assert.deepEqual([...storage], previousStorage);
       assert.equal(storageWrites.length, 0);
+      assert.equal(storageDeletes.length, 0);
+      assert.equal(context.window.location.href, "");
+      elements.get("minimum-review-count").value = "0";
+      elements.get("save-btn").click();
+      assert.match(elements.get("status-message").innerHTML, /50 or higher/);
+      assert.deepEqual([...storage], previousStorage);
+      assert.equal(storageWrites.length, 0);
+      assert.equal(storageDeletes.length, 0);
       assert.equal(context.window.location.href, "");
       elements.get("minimum-review-count").value = String(correctedMinimum);
       elements.get("save-btn").click();
       assert.equal(context.getSettings().minimumReviewCount, correctedMinimum);
       assert.equal(context.getSettings().description, previousSettings.description);
       assert.equal(context.getComparisonSample(), null);
+      assert.deepEqual(plain(context.getExcludedGameIds()), excludedGameIds);
+      assert.deepEqual(storageWrites, [SETTINGS_KEY]);
+      assert.deepEqual(storageDeletes, [SAMPLE_KEY]);
       assert.equal(context.window.location.href, "compare.html");
     }
   }

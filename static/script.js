@@ -7,13 +7,12 @@ const REVIEW_COUNT_SCOPE = "Steam purchases, all languages, positive and negativ
 let catalogueRequest = null;
 
 function isMinimumReviewCountAllowed(minimumReviewCount) {
-  return Number.isSafeInteger(minimumReviewCount) &&
-    (minimumReviewCount === 0 || minimumReviewCount >= 50);
+  return Number.isSafeInteger(minimumReviewCount) && minimumReviewCount >= 50;
 }
 
 function validateMinimumReviewCount(minimumReviewCount) {
   if (!isMinimumReviewCountAllowed(minimumReviewCount)) {
-    throw new Error("Minimum Steam reviews must be 0 or a whole number of 50 or more.");
+    throw new Error("Minimum Steam reviews must be a whole number of 50 or higher.");
   }
 }
 
@@ -237,7 +236,7 @@ function getEligibleGames(catalogue, genreId, minimumReviewCount, additionallyEx
 async function fetchTags() {
   const catalogue = await fetchCatalogue();
   return catalogue.genres.map(genre => ({
-    id: genre.id, name: genre.name, availableCount: getEligibleGames(catalogue, genre.id, 0).length,
+    id: genre.id, name: genre.name, availableCount: getEligibleGames(catalogue, genre.id, catalogue.minimumReviewCount).length,
     catalogueCount: genre.gameIds.length,
   }));
 }
