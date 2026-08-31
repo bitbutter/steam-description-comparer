@@ -2,13 +2,13 @@
 
 [Use the free public tool](https://bitbutter.github.io/steam-description-comparer/).
 
-Compare your game description with descriptions from Steam games that have found an audience. Choose a genre, mix your description with four others, and ask people to rank them.
+Put your game description beside four descriptions from Steam games that have found an audience. Choose a genre and a minimum review count, then drag the cards into whatever arrangement helps you compare them.
 
 The catalogue is a one-time snapshot of 4,213 distinct games, with exactly 600 in each of 15 genres. Every game had at least 50 reviews when collected. Games can appear in more than one genre. Review count is a rough measure of traction; it does not say how good the game or its description is.
 
-Use **Edit sample** to exclude a familiar game. Exclusions stay in your browser and can be restored in Settings. Normal ranking hides the Steam game names and review counts.
+Each Steam card shows its title, review count and store link. Use **Exclude** on a card to replace that game and keep it out of future samples. Exclusions can be restored in Settings. **New sample** draws another set of four games. Editing your own description preserves the current Steam cards and their arrangement.
 
-Your description, rankings and exclusions stay in this browser. They are not uploaded. Browser data does not carry across devices or website addresses; clearing site data removes it. Download the results JSON to keep a copy. GitHub Pages receives normal page requests and logs visitor IP addresses under its own privacy policy.
+Your description, card arrangement and exclusions stay in this browser. They are not uploaded or synced across devices; clearing site data removes them. GitHub Pages receives normal page requests and logs visitor IP addresses under its own privacy policy.
 
 ## Catalogue
 
@@ -16,7 +16,7 @@ The collector resolves genres against Steam's public tag list and reads English 
 
 Candidates come from Steam's tag search in relevance order. Each game counts towards all of its verified genres. A fixed random seed selects 600 qualifying games per genre from the collected pool. This is a fixed comparison pool, not a representative sample of every game on Steam. The browser draws randomly from that pool after applying your review minimum and exclusions. Raising the minimum can leave fewer than four eligible games; the tool reports that without lowering the requirement.
 
-There are no scheduled refreshes or live Steam calls from the website. The collection date and actual counts appear in the tool. Previously recorded rankings are retained, including rankings made with different samples or review minima.
+There are no scheduled refreshes or live Steam calls from the website. The collection date and actual counts appear in the tool. Some game names within the saved descriptions are blanked out; the source title remains visible on each card.
 
 Game descriptions and titles belong to their respective creators. Source Steam store links are included in the catalogue. This project is not affiliated with Valve. SortableJS is bundled under its [MIT licence](static/vendor/sortable.LICENSE.txt).
 

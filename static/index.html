@@ -3,40 +3,37 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Steam Comparer</title>
+<meta name="description" content="Put your game description alongside four Steam descriptions. Filter by genre and review count, rearrange the cards, and exclude familiar games.">
+<title>Steam Description Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div class="container">
   <header>
     <h1>Steam Comparer</h1>
-    <nav>
+    <nav aria-label="Main navigation">
+      <a href="index.html" aria-current="page">Home</a>
       <a href="settings.html">Settings</a>
       <a href="compare.html">Compare</a>
-      <a href="results.html">Results</a>
     </nav>
   </header>
-  <p id="legacy-import-notice" class="page-note" role="status"></p>
   <div class="hero">
-    <h2>Game Description Market Research</h2>
-    <p>Compare your game description against Steam games with an audience. Rank five descriptions, then see where yours places.</p>
-    <p style="color:var(--accent);font-size:14px;margin-top:8px">Start by entering your game description and picking a genre in <a href="settings.html" style="color:var(--accent);text-decoration:underline">Settings</a>.</p>
+    <h2>Put your description beside Steam games</h2>
+    <p>Choose a genre and a minimum review count. Read your description alongside four games from the catalogue, and drag the cards into any order.</p>
     <div class="hero-links">
-      <a href="settings.html" class="btn btn-primary btn-block">Settings</a>
-      <a href="compare.html" class="btn btn-secondary btn-block">Compare</a>
-      <a href="results.html" class="btn btn-secondary btn-block">Results</a>
+      <a href="settings.html" class="btn btn-primary btn-block">Start comparing</a>
     </div>
   </div>
+  <p class="page-note">Use New sample for another set of games, or Exclude to keep a game out of future samples. You can restore excluded games in Settings.</p>
   <p id="catalogue-details" class="page-note"></p>
-  <p class="page-note">Your descriptions, rankings, and exclusions are stored locally in your browser and aren't uploaded by this tool.</p>
-  <p class="page-note">Use Edit sample to exclude familiar games. Names and review counts stay hidden while ranking.</p>
+  <p class="page-note">Your description and exclusions are stored locally in your browser and aren't uploaded by this tool.</p>
   <p class="page-note">Steam descriptions belong to their respective owners. This tool is not affiliated with Valve or Steam. The website host receives normal page requests.</p>
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>.</p></footer>
 </div>
-<script src="script.js?v=4"></script>
+<script src="script.js?v=5"></script>
 <script>
-Promise.resolve().then(() => { initializeBrowserStorage(); return fetchCatalogue(); }).then(catalogue => { document.getElementById("catalogue-details").textContent = catalogueSummary(catalogue); }).catch(error => { document.getElementById("catalogue-details").textContent = error.message; });
+fetchCatalogue().then(catalogue => { document.getElementById("catalogue-details").textContent = catalogueSummary(catalogue); }).catch(error => { document.getElementById("catalogue-details").textContent = error.message; });
 </script>
 </body>
 </html>

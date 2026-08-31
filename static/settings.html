@@ -5,18 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Settings - Steam Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div class="container">
   <header><h1>Settings</h1><nav aria-label="Main navigation">
-    <a href="settings.html" aria-current="page">Settings</a><a href="compare.html">Compare</a><a href="results.html">Results</a>
+    <a href="index.html">Home</a><a href="settings.html" aria-current="page">Settings</a><a href="compare.html">Compare</a>
   </nav></header>
-  <p id="legacy-import-notice" class="page-note" role="status"></p>
   <div id="status-message" role="status" aria-live="polite"></div>
   <div class="form-group">
     <label for="description">Your game description</label>
-    <p>Paste the description you want to test. It will be mixed in with four Steam descriptions.</p>
+    <p>Paste the short description you want to compare with Steam games.</p>
     <textarea id="description" placeholder="A tactical deckbuilding roguelike where..." rows="5"></textarea>
   </div>
   <div class="form-group">
@@ -30,20 +29,21 @@
     <input id="minimum-review-count" type="number" min="0" step="1" value="50" required>
     <p id="eligible-game-count" class="page-note" aria-live="polite"></p>
   </div>
-  <div class="actions"><button id="save-btn" class="btn btn-primary btn-block" disabled>Save settings</button></div>
+  <div class="actions"><button id="save-btn" class="btn btn-primary btn-block" disabled>Compare descriptions</button></div>
   <section class="settings-section" aria-labelledby="exclusions-heading">
     <h2 id="exclusions-heading">Excluded games</h2>
-    <p>Use Edit sample on Compare to exclude a Steam game. It stays out of future samples in this browser until you restore it here. Recorded rankings are unchanged.</p>
+    <p>Exclude a Steam game directly from its card on Compare. It stays out of future samples in this browser until you restore it here.</p>
     <div id="excluded-games-list"></div>
   </section>
   <p id="catalogue-details" class="page-note"></p>
-  <p class="page-note">Your description, rankings, settings, and excluded games are saved in this browser profile. Other pages hosted on the same web origin can access browser storage. They are not uploaded or synced by this tool. Clearing site data removes them; private browsing may remove them when the window closes. No account needed.</p>
+  <p class="page-note">Your description and exclusions are stored locally in your browser and aren't uploaded by this tool. Clearing site data removes them.</p>
   <p class="page-note">This site serves a fixed catalogue, not live Steam data. Steam descriptions belong to their respective owners. This tool is not affiliated with Valve or Steam. The website host receives normal page requests.</p>
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>.</p></footer>
 </div>
-<script src="script.js?v=4"></script>
+<script src="script.js?v=5"></script>
 <script>
 let settingsCatalogue = null;
+let settingsChangedInAnotherTab = false;
 
 function showSettingsStatus(message, success = false) {
   document.getElementById("status-message").innerHTML = '<div class="status ' +
@@ -81,7 +81,7 @@ function renderExcludedGames() {
         restoreSteamGame(button.dataset.gameId);
         renderExcludedGames();
         renderEligibleGameCount();
-        showSettingsStatus("Game restored to future samples. Recorded rankings are unchanged.", true);
+        showSettingsStatus("Game restored to future samples.", true);
       } catch (error) { showSettingsStatus(error.message); }
     }));
     document.getElementById("restore-all-btn").addEventListener("click", () => {
@@ -105,10 +105,9 @@ async function init() {
   const saveButton = document.getElementById("save-btn");
   let saved;
   try {
-    initializeBrowserStorage();
     saved = getSettings();
     if (saved) {
-      descriptionElement.value = saved.description || "";
+      descriptionElement.value = saved.description;
       minimumElement.value = saved.minimumReviewCount;
     }
     settingsCatalogue = await fetchCatalogue();
@@ -124,7 +123,7 @@ async function init() {
     document.getElementById("catalogue-details").textContent = catalogueSummary(settingsCatalogue);
     renderExcludedGames();
     renderEligibleGameCount();
-    saveButton.disabled = false;
+    saveButton.disabled = settingsChangedInAnotherTab;
   } catch (error) {
     genreElement.innerHTML = '<option value="">Unable to load settings</option>';
     showSettingsStatus(error.message);
@@ -141,15 +140,16 @@ async function init() {
       validateMinimumReviewCount(minimumReviewCount);
       const previousSettings = getSettings();
       const nextSettings = { description, tag, minimumReviewCount };
-      const samplingChanged = !batchMatchesSamplingSettings(previousSettings, nextSettings);
+      const filtersChanged = !previousSettings || String(previousSettings.tag) !== String(tag) || previousSettings.minimumReviewCount !== minimumReviewCount;
       const eligibleCount = getEligibleGames(settingsCatalogue, tag, minimumReviewCount).length;
       setSettings(nextSettings);
-      if (samplingChanged || eligibleCount < 4) clearBatch();
-      showSettingsStatus(eligibleCount < 4 ?
-        "Settings saved, but fewer than four games are eligible. Lower the review minimum, choose another genre, or restore excluded games." :
-        (samplingChanged ? "Settings saved. Load a new sample on Compare. Previous rankings are unchanged." : "Settings saved."),
-        eligibleCount >= 4);
-      renderEligibleGameCount();
+      if (filtersChanged || eligibleCount < 4) clearComparisonSample();
+      if (eligibleCount < 4) {
+        showSettingsStatus("Fewer than four games are eligible. Lower the review minimum, choose another genre, or restore excluded games.");
+        renderEligibleGameCount();
+      } else {
+        window.location.href = "compare.html";
+      }
     } catch (error) { showSettingsStatus(error.message); }
   });
 }
@@ -159,7 +159,11 @@ window.addEventListener("storage", event => {
     renderExcludedGames();
     renderEligibleGameCount();
   }
-  if (event.key === null || event.key === SETTINGS_STORAGE_KEY) showSettingsStatus("Settings changed in another tab. Reload this page before making further changes.");
+  if (event.key === null || event.key === SETTINGS_STORAGE_KEY) {
+    settingsChangedInAnotherTab = true;
+    document.getElementById("save-btn").disabled = true;
+    showSettingsStatus("Settings changed in another tab. Reload this page before making further changes.");
+  }
 });
 init();
 </script>

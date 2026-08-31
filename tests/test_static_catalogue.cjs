@@ -5,9 +5,11 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const staticDirectory = path.join(__dirname, "..", "static");
-const sharedScript = fs.readFileSync(path.join(staticDirectory, "script.js"), "utf8");
-const compareInlineScript = fs.readFileSync(path.join(staticDirectory, "compare.html"), "utf8")
-  .match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/init\(\);\s*$/, "");
+const SETTINGS_KEY = "steamDescriptionComparer:settings";
+const SAMPLE_KEY = "steamDescriptionComparer:comparisonSample";
+const EXCLUSIONS_KEY = "steamDescriptionComparer:excludedSteamGameIds";
+const YOUR_DESCRIPTION_ID = "your-description";
+const plain = value => JSON.parse(JSON.stringify(value));
 
 function catalogueFixture() {
   const games = Array.from({length: 8}, (_, index) => {
@@ -25,74 +27,127 @@ function catalogueFixture() {
     ], games};
 }
 
-function browserContext({catalogue = catalogueFixture(), storage = new Map(), fetchResponse, compare = false} = {}) {
+function settingsFixture() {
+  return {description: "My candidate description", tag: "1", minimumReviewCount: 50};
+}
+
+function sampleFixture() {
+  return {catalogueId: catalogueFixture().catalogueId, genreId: "1", minimumReviewCount: 50,
+    descriptionIds: ["steam_3", YOUR_DESCRIPTION_ID, "steam_1", "steam_4", "steam_2"]};
+}
+
+function browserContext({catalogue = catalogueFixture(), storage = new Map(), fetchResponse, compare = false, settings = false, realComparisonRenderer = false} = {}) {
   const fetchUrls = [];
   const elements = new Map();
   const storageListeners = [];
+  const storageReads = [];
+  const storageWrites = [];
+  const storageDeletes = [];
+  const createElement = () => ({
+    innerHTML: "", textContent: "", disabled: false, hidden: false, value: "",
+    listeners: new Map(),
+    get valueAsNumber() { return this.value === "" ? NaN : Number(this.value); },
+    addEventListener(event, callback) {
+      const callbacks = this.listeners.get(event) || [];
+      callbacks.push(callback);
+      this.listeners.set(event, callbacks);
+    },
+    appendChild(child) { if (child.selected) this.value = String(child.value); },
+    click() { if (!this.disabled) for (const callback of this.listeners.get("click") || []) callback(); },
+    querySelectorAll() { return []; },
+  });
   const element = id => {
-    if (!elements.has(id)) elements.set(id, {
-      innerHTML: "", textContent: "", disabled: false,
-      addEventListener() {}, querySelectorAll() { return []; },
-    });
+    if (!elements.has(id)) {
+      const created = createElement();
+      created.disabled = ["save-btn", "new-sample-btn"].includes(id);
+      elements.set(id, created);
+    }
     return elements.get(id);
   };
   const context = vm.createContext({
     localStorage: {
-      getItem: key => storage.has(key) ? storage.get(key) : null,
-      setItem: (key, value) => storage.set(key, String(value)),
-      removeItem: key => storage.delete(key),
+      getItem: key => { storageReads.push(key); return storage.has(key) ? storage.get(key) : null; },
+      setItem: (key, value) => { storageWrites.push(key); storage.set(key, String(value)); },
+      removeItem: key => { storageDeletes.push(key); storage.delete(key); },
     },
     fetch: async url => {
       fetchUrls.push(url);
       return fetchResponse ? fetchResponse() : {ok: true, json: async () => catalogue};
     },
-    document: {getElementById: element, querySelectorAll: () => []},
-    window: {addEventListener: (event, callback) => { if (event === "storage") storageListeners.push(callback); }},
+    document: {getElementById: element, querySelectorAll: () => [], createElement},
+    window: {location: {href: ""}, addEventListener: (event, callback) => { if (event === "storage") storageListeners.push(callback); }},
+    Sortable: function () { this.destroy = () => {}; },
     setTimeout, clearTimeout, console,
   });
-  vm.runInContext(sharedScript, context);
+  vm.runInContext(fs.readFileSync(path.join(staticDirectory, "script.js"), "utf8"), context);
   if (compare) {
+    const compareInlineScript = fs.readFileSync(path.join(staticDirectory, "compare.html"), "utf8")
+      .match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/init\(\);\s*$/, "");
     vm.runInContext(compareInlineScript, context);
     context.fixtureCatalogue = catalogue;
-    vm.runInContext("comparisonCatalogue = fixtureCatalogue; renderPage = message => { globalThis.lastRenderMessage = message; };", context);
+    vm.runInContext("comparisonCatalogue = fixtureCatalogue;", context);
+    if (!realComparisonRenderer) {
+      vm.runInContext("renderComparisonPage = message => { globalThis.lastRenderMessage = message; };", context);
+    }
   }
-  return {context, storage, fetchUrls, elements, storageListeners};
+  if (settings) {
+    const settingsInlineScript = fs.readFileSync(path.join(staticDirectory, "settings.html"), "utf8")
+      .match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/init\(\);\s*$/, "");
+    vm.runInContext(settingsInlineScript, context);
+  }
+  return {context, storage, fetchUrls, elements, storageListeners, storageReads, storageWrites, storageDeletes};
 }
 
-function seedComparison(context, catalogue = catalogueFixture()) {
-  context.setSettings({description: "My candidate description", tag: "1", minimumReviewCount: 50});
-  const candidate = {id: context.hashStr("My candidate description"), text: "My candidate description"};
-  const batch = {id: "fixture-batch", catalogueId: catalogue.catalogueId, tag: "1", minimumReviewCount: 50,
-    items: [...catalogue.games.slice(0, 4), candidate]};
-  context.setBatch(batch);
-  context.fixtureBatch = batch;
-  vm.runInContext("currentlyDisplayedBatchId = fixtureBatch.id; getRankOrder = () => fixtureBatch.items.map(item => item.id);", context);
-  return batch;
+function seedComparison(context, sample = sampleFixture()) {
+  context.setSettings(settingsFixture());
+  context.saveComparisonSample(sample);
+  context.fixtureSample = plain(sample);
+  vm.runInContext("currentlyDisplayedComparisonSample = fixtureSample;", context);
+  return sample;
 }
 
-test("catalogue is fetched once with a project-relative URL", async () => {
+function setDraggedOrder(context, descriptionIds) {
+  context.draggedDescriptionIds = descriptionIds;
+  vm.runInContext("descriptionSortable = {toArray: () => draggedDescriptionIds, destroy() {}};", context);
+}
+
+test("the catalogue is fetched once with a project-relative URL", async () => {
   const {context, fetchUrls} = browserContext();
-  await Promise.all([context.fetchCatalogue(), context.fetchTags(), context.fetchGames(1, 50)]);
+  const [catalogue] = await Promise.all([context.fetchCatalogue(), context.fetchTags(), context.fetchCatalogue()]);
+  assert.equal(context.chooseSteamGames(catalogue, 1, 50).length, 4);
   assert.deepEqual(fetchUrls, ["catalogue.json"]);
 });
 
-test("genre selection, higher minimums, explicit zero, and unique cards use the saved catalogue", async () => {
+test("genre selection, higher minimums, zero, and unique descriptions use the saved catalogue", async () => {
   const {context} = browserContext();
-  const filtered = await context.fetchGames(1, 100);
+  const catalogue = await context.fetchCatalogue();
+  const filtered = context.chooseSteamGames(catalogue, 1, 100);
   assert.equal(filtered.length, 4);
   assert.equal(new Set(filtered.map(game => game.id)).size, 4);
   assert.ok(filtered.every(game => game.reviews >= 100 && game.steamTagIds.includes(19)));
-  const catalogue = await context.fetchCatalogue();
   assert.equal(context.getEligibleGames(catalogue, 1, 0).length, 6);
-  assert.throws(() => context.getEligibleGames(catalogue, 1, -1), /whole number/);
   assert.throws(() => context.getEligibleGames(catalogue, 999, 50), /selected genre/);
+  for (const minimum of [-1, 0.5, "50", true, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => context.validateMinimumReviewCount(minimum), /whole number/);
+  }
 });
 
-test("catalogue refuses review-definition drift, below-floor games, and invalid identities", () => {
+test("selected game copies cannot mutate the catalogue used for later samples", () => {
+  const {context} = browserContext();
+  const catalogue = catalogueFixture();
+  const original = plain(catalogue);
+  const chosen = context.chooseSteamGames(catalogue, 1, 50);
+  chosen[0].text = "Changed outside the catalogue";
+  chosen[0].steamTagIds.push(999);
+  assert.deepEqual(catalogue, original);
+});
+
+test("catalogue validation rejects review drift, missing text, and invalid identities", () => {
   const {context} = browserContext();
   for (const mutate of [
     catalogue => { catalogue.reviewCountScope = "all reviews"; },
     catalogue => { catalogue.games[0].reviews = 49; },
+    catalogue => { catalogue.games[0].reviews = true; },
     catalogue => { catalogue.games[0].id = "steam_2"; },
     catalogue => { catalogue.games[0].storeUrl = "https://example.com"; },
     catalogue => { catalogue.games[0].text = ""; },
@@ -104,7 +159,7 @@ test("catalogue refuses review-definition drift, below-floor games, and invalid 
   }
 });
 
-test("catalogue rejects absent games, duplicate memberships, and mismatched Steam tags", () => {
+test("catalogue validation rejects unknown games, duplicate memberships, and wrong Steam tags", () => {
   const {context} = browserContext();
   for (const gameIds of [["steam_999"], ["steam_1", "steam_1"], ["steam_7"]]) {
     const catalogue = catalogueFixture();
@@ -113,148 +168,311 @@ test("catalogue rejects absent games, duplicate memberships, and mismatched Stea
   }
 });
 
-test("exclusions persist across browser contexts, exclude replacements, and restore individually", async () => {
+test("exclusions survive reload, affect replacement selection, and restore individually", () => {
   const storage = new Map();
   const first = browserContext({storage}).context;
-  const catalogue = await first.fetchCatalogue();
+  const catalogue = catalogueFixture();
   first.excludeSteamGame("steam_1", catalogue);
   first.excludeSteamGame("steam_1", catalogue);
   const second = browserContext({storage}).context;
-  assert.deepEqual(JSON.parse(JSON.stringify(second.getExcludedGameIds())), ["steam_1"]);
-  const replacement = await second.fetchGames(1, 50, ["steam_2", "steam_3", "steam_4"], 1);
+  assert.deepEqual(plain(second.getExcludedGameIds()), ["steam_1"]);
+  const replacement = second.chooseSteamGames(catalogue, 1, 50, ["steam_2", "steam_3", "steam_4"], 1);
   assert.ok(["steam_5", "steam_6"].includes(replacement[0].id));
   first.restoreSteamGame("steam_1");
   assert.equal(second.getExcludedGameIds().length, 0);
 });
 
-test("own candidate cannot enter exclusions and damaged exclusion storage fails explicitly", async () => {
+test("the candidate cannot be excluded and damaged exclusion storage fails explicitly", () => {
   const {context, storage} = browserContext();
-  assert.throws(() => context.excludeSteamGame("exp_candidate", catalogueFixture()), /Only a Steam game/);
-  storage.set("steamDescriptionComparer:excludedSteamGameIds", '["exp_candidate"]');
-  await assert.rejects(context.fetchGames(1, 0), /excluded games list is invalid/);
-  storage.set("steamDescriptionComparer:excludedSteamGameIds", '["steam_1","steam_1"]');
-  assert.throws(() => context.getExcludedGameIds(), /excluded games list is invalid/);
+  assert.throws(() => context.excludeSteamGame(YOUR_DESCRIPTION_ID, catalogueFixture()), /Only a Steam game/);
+  for (const serialized of ['', '["your-description"]', '["steam_1","steam_1"]', 'null', 'not-json']) {
+    storage.set(EXCLUSIONS_KEY, serialized);
+    assert.throws(() => context.chooseSteamGames(catalogueFixture(), 1, 0), /excluded games list/);
+    assert.equal(storage.get(EXCLUSIONS_KEY), serialized);
+  }
 });
 
-test("underfilled pools never lower the minimum or return excluded games", async () => {
+test("underfilled pools never weaken the review minimum or restore excluded games", () => {
   const {context} = browserContext();
-  await assert.rejects(context.fetchGames(1, 150), /Too few eligible/);
-  context.excludeSteamGame("steam_1", catalogueFixture());
-  context.excludeSteamGame("steam_2", catalogueFixture());
-  context.excludeSteamGame("steam_3", catalogueFixture());
-  await assert.rejects(context.fetchGames(1, 0), /restore excluded games/);
+  const catalogue = catalogueFixture();
+  assert.throws(() => context.chooseSteamGames(catalogue, 1, 150), /Too few eligible/);
+  for (const gameId of ["steam_1", "steam_2", "steam_3"]) context.excludeSteamGame(gameId, catalogue);
+  assert.throws(() => context.createComparisonSample(catalogue, settingsFixture()), /restore excluded games/);
+  assert.deepEqual(plain(context.getExcludedGameIds()), ["steam_1", "steam_2", "steam_3"]);
+  for (const sampleSize of [0, 5, 1.5]) {
+    assert.throws(() => context.chooseSteamGames(catalogue, 1, 0, [], sampleSize), /one and four/);
+  }
 });
 
-test("exclusions added while the catalogue request is in flight affect the first sample", async () => {
+test("exclusions added during catalogue loading affect the first comparison sample", async () => {
   let releaseResponse;
   const responsePromise = new Promise(resolve => { releaseResponse = resolve; });
   const {context, storage} = browserContext({fetchResponse: () => responsePromise});
-  const samplePromise = context.fetchGames(1, 0);
-  storage.set("steamDescriptionComparer:excludedSteamGameIds", '["steam_1","steam_2"]');
+  const samplePromise = context.fetchCatalogue().then(catalogue => context.createComparisonSample(catalogue, settingsFixture()));
+  storage.set(EXCLUSIONS_KEY, '["steam_1","steam_2"]');
   releaseResponse({ok: true, json: async () => catalogueFixture()});
-  const games = await samplePromise;
-  assert.deepEqual(Array.from(games.map(game => game.id)).sort(), ["steam_3", "steam_4", "steam_5", "steam_6"]);
+  const sample = await samplePromise;
+  assert.deepEqual(Array.from(sample.descriptionIds).sort(), ["steam_3", "steam_4", "steam_5", "steam_6", YOUR_DESCRIPTION_ID].sort());
 });
 
-test("legacy and foreign catalogue batches are incompatible while old rankings remain intact", () => {
+test("a new comparison sample contains exactly the candidate and four canonical Steam ids", () => {
+  const {context} = browserContext();
+  const sample = context.createComparisonSample(catalogueFixture(), settingsFixture());
+  assert.equal(sample.catalogueId, catalogueFixture().catalogueId);
+  assert.equal(sample.genreId, "1");
+  assert.equal(sample.minimumReviewCount, 50);
+  assert.equal(sample.descriptionIds.length, 5);
+  assert.equal(new Set(sample.descriptionIds).size, 5);
+  assert.equal(sample.descriptionIds.filter(id => id === YOUR_DESCRIPTION_ID).length, 1);
+  assert.equal(sample.descriptionIds.filter(id => /^steam_[1-9][0-9]*$/.test(id)).length, 4);
+  assert.equal(context.comparisonSampleMatchesSettings(sample, settingsFixture(), catalogueFixture()), true);
+});
+
+test("sample storage requires all five unique ids and an explicit sample definition", () => {
+  const {context, storage} = browserContext();
+  context.saveComparisonSample(sampleFixture());
+  const previousSample = storage.get(SAMPLE_KEY);
+  for (const mutate of [
+    sample => { sample.descriptionIds.pop(); },
+    sample => { sample.descriptionIds[0] = sample.descriptionIds[2]; },
+    sample => { sample.descriptionIds[1] = "steam_5"; },
+    sample => { sample.descriptionIds[0] = YOUR_DESCRIPTION_ID; },
+    sample => { sample.descriptionIds[0] = "steam_01"; },
+    sample => { sample.descriptionIds[0] = 1; },
+    sample => { sample.minimumReviewCount = "50"; },
+    sample => { sample.catalogueId = ""; },
+    sample => { delete sample.genreId; },
+  ]) {
+    const sample = sampleFixture();
+    mutate(sample);
+    assert.throws(() => context.saveComparisonSample(sample));
+    assert.equal(storage.get(SAMPLE_KEY), previousSample);
+    assert.equal(context.comparisonSampleMatchesSettings(sample, settingsFixture(), catalogueFixture()), false);
+    storage.set(SAMPLE_KEY, JSON.stringify(sample));
+    assert.throws(() => context.getComparisonSample());
+    storage.set(SAMPLE_KEY, previousSample);
+  }
+  storage.set(SAMPLE_KEY, "malformed JSON");
+  assert.throws(() => context.getComparisonSample(), /sample/i);
+  assert.equal(storage.get(SAMPLE_KEY), "malformed JSON");
+});
+
+test("saved comparison order survives reload without copying descriptions into the sample", () => {
+  const storage = new Map();
+  const first = browserContext({storage}).context;
+  first.setSettings(settingsFixture());
+  first.saveComparisonSample(sampleFixture());
+  const second = browserContext({storage}).context;
+  const restored = second.getComparisonSample();
+  assert.deepEqual(plain(restored), sampleFixture());
+  assert.deepEqual(Array.from(second.comparisonDescriptions(catalogueFixture(), restored, second.getSettings()), card => card.id), sampleFixture().descriptionIds);
+  assert.deepEqual(Object.keys(JSON.parse(storage.get(SAMPLE_KEY))).sort(), ["catalogueId", "descriptionIds", "genreId", "minimumReviewCount"].sort());
+});
+
+test("changing the candidate text keeps Steam games and their arranged positions", () => {
+  const {context} = browserContext();
+  const catalogue = catalogueFixture();
+  const sample = sampleFixture();
+  const settings = {...settingsFixture(), description: "An edited candidate description"};
+  assert.equal(context.comparisonSampleMatchesSettings(sample, settings, catalogue), true);
+  const descriptions = context.comparisonDescriptions(catalogue, sample, settings);
+  assert.deepEqual(Array.from(descriptions, description => description.id), sample.descriptionIds);
+  assert.equal(descriptions[1].text, settings.description);
+  assert.equal(descriptions[0].text, "Description 3");
+  assert.deepEqual(Array.from(context.comparisonGames(catalogue, sample), game => game.id), ["steam_3", "steam_1", "steam_4", "steam_2"]);
+  assert.deepEqual(sample, sampleFixture());
+});
+
+test("sample matching rejects stale catalogue, changed filters, excluded and missing games", () => {
+  const {context} = browserContext();
+  const catalogue = catalogueFixture();
+  const sample = sampleFixture();
+  const settings = settingsFixture();
+  assert.equal(context.comparisonSampleMatchesSettings(sample, settings, catalogue), true);
+  assert.equal(context.comparisonSampleMatchesSettings({...sample, catalogueId: "another-catalogue"}, settings, catalogue), false);
+  assert.equal(context.comparisonSampleMatchesSettings(sample, {...settings, tag: "21"}, catalogue), false);
+  assert.equal(context.comparisonSampleMatchesSettings(sample, {...settings, minimumReviewCount: 75}, catalogue), false);
+  const unknownGameSample = {...sample, descriptionIds: [YOUR_DESCRIPTION_ID, "steam_999", "steam_2", "steam_3", "steam_4"]};
+  assert.equal(context.comparisonSampleMatchesSettings(unknownGameSample, settings, catalogue), false);
+  assert.throws(() => context.comparisonGames(catalogue, unknownGameSample));
+  assert.throws(() => context.comparisonDescriptions(catalogue, unknownGameSample, settings));
+  context.excludeSteamGame("steam_1", catalogue);
+  assert.equal(context.comparisonSampleMatchesSettings(sample, settings, catalogue), false);
+});
+
+test("sample resolution fails explicitly for malformed samples and invalid settings", () => {
+  const {context} = browserContext();
+  for (const sample of [null, {}, {...sampleFixture(), descriptionIds: [YOUR_DESCRIPTION_ID]}]) {
+    assert.throws(() => context.comparisonGames(catalogueFixture(), sample));
+    assert.throws(() => context.comparisonDescriptions(catalogueFixture(), sample, settingsFixture()));
+  }
+  assert.throws(() => context.comparisonDescriptions(catalogueFixture(), sampleFixture(), {description: null, tag: "1", minimumReviewCount: 50}));
+});
+
+test("dragging all five descriptions stores their exact permutation without a submit step", () => {
+  const {context, storageWrites} = browserContext({compare: true});
+  seedComparison(context);
+  const arrangedOrder = ["steam_4", "steam_2", "steam_1", YOUR_DESCRIPTION_ID, "steam_3"];
+  setDraggedOrder(context, arrangedOrder);
+  const beforeWrites = storageWrites.length;
+  context.onDescriptionsReordered();
+  assert.deepEqual(Array.from(context.getComparisonSample().descriptionIds), arrangedOrder);
+  assert.deepEqual(storageWrites.slice(beforeWrites), [SAMPLE_KEY]);
+  const reloaded = browserContext({storage: new Map([[SAMPLE_KEY, JSON.stringify(context.getComparisonSample())]])}).context;
+  assert.deepEqual(Array.from(reloaded.getComparisonSample().descriptionIds), arrangedOrder);
+});
+
+test("a drag cannot drop, repeat, inject, or substitute a description", () => {
+  for (const order of [
+    ["steam_3", YOUR_DESCRIPTION_ID, "steam_1", "steam_4"],
+    ["steam_3", YOUR_DESCRIPTION_ID, "steam_1", "steam_4", "steam_4"],
+    ["steam_3", YOUR_DESCRIPTION_ID, "steam_1", "steam_4", "steam_5"],
+    ["steam_3", YOUR_DESCRIPTION_ID, "steam_1", "steam_4", "injected"],
+  ]) {
+    const {context, storage} = browserContext({compare: true});
+    seedComparison(context);
+    const saved = storage.get(SAMPLE_KEY);
+    setDraggedOrder(context, order);
+    context.onDescriptionsReordered();
+    assert.equal(storage.get(SAMPLE_KEY), saved);
+    assert.ok(context.lastRenderMessage);
+  }
+});
+
+test("an old drag cannot overwrite a newer sample saved by another tab", () => {
   const {context, storage} = browserContext({compare: true});
-  const batch = seedComparison(context);
-  const settings = context.getSettings();
-  storage.set("steamDescriptionComparer:surveyResults", JSON.stringify([{id: "legacy", items: [], rank: []}]));
-  assert.equal(context.batchMatchesCatalogueSettings(batch, settings, catalogueFixture()), true);
-  delete batch.catalogueId;
-  assert.equal(context.batchMatchesCatalogueSettings(batch, settings, catalogueFixture()), false);
-  batch.catalogueId = "another-catalogue";
-  assert.equal(context.batchMatchesCatalogueSettings(batch, settings, catalogueFixture()), false);
-  assert.equal(context.getResults()[0].id, "legacy");
+  seedComparison(context);
+  const newerSample = {...sampleFixture(), descriptionIds: [YOUR_DESCRIPTION_ID, "steam_2", "steam_4", "steam_5", "steam_6"]};
+  context.saveComparisonSample(newerSample);
+  const saved = storage.get(SAMPLE_KEY);
+  setDraggedOrder(context, [...sampleFixture().descriptionIds].reverse());
+  context.onDescriptionsReordered();
+  assert.equal(storage.get(SAMPLE_KEY), saved);
+  assert.ok(context.lastRenderMessage);
 });
 
-test("editing blocks ranking and excluding a Steam card persists, replaces once, and changes batch identity", async () => {
-  const {context} = browserContext({compare: true});
-  const originalBatch = seedComparison(context);
-  vm.runInContext("sampleEditMode = true;", context);
-  context.onDone();
-  assert.equal(context.getResults().length, 0);
-  await context.onExcludeGame("steam_1");
-  const updatedBatch = context.getBatch();
-  assert.notEqual(updatedBatch.id, originalBatch.id);
-  assert.equal(updatedBatch.items.length, 5);
-  assert.equal(new Set(updatedBatch.items.map(item => item.id)).size, 5);
-  assert.equal(updatedBatch.items.filter(item => context.isCandidateDescription(item)).length, 1);
-  assert.ok(!updatedBatch.items.some(item => item.id === "steam_1"));
+test("excluding a Steam description replaces only its arranged slot and persists the exclusion", () => {
+  const {context, storageWrites} = browserContext({compare: true});
+  const sample = seedComparison(context);
+  const beforeWrites = storageWrites.length;
+  context.onExcludeGame("steam_1");
+  const updated = context.getComparisonSample();
+  assert.equal(updated.descriptionIds.length, 5);
+  assert.equal(new Set(updated.descriptionIds).size, 5);
+  assert.ok(["steam_5", "steam_6"].includes(updated.descriptionIds[2]));
+  for (const index of [0, 1, 3, 4]) assert.equal(updated.descriptionIds[index], sample.descriptionIds[index]);
   assert.ok(context.getExcludedGameIds().includes("steam_1"));
+  assert.ok(storageWrites.slice(beforeWrites).every(key => [SAMPLE_KEY, EXCLUSIONS_KEY].includes(key)));
 });
 
-test("excluding the last available replacement clears stale sample but preserves the exclusion", async () => {
-  const {context} = browserContext({compare: true});
+test("exclusion is retained when no valid replacement remains and the stale sample is cleared", () => {
+  const {context, elements} = browserContext({compare: true});
   seedComparison(context);
   context.excludeSteamGame("steam_5", catalogueFixture());
   context.excludeSteamGame("steam_6", catalogueFixture());
-  vm.runInContext("sampleEditMode = true;", context);
-  await context.onExcludeGame("steam_1");
-  assert.equal(context.getBatch(), null);
+  context.onExcludeGame("steam_1");
+  assert.equal(context.getComparisonSample(), null);
   assert.ok(context.getExcludedGameIds().includes("steam_1"));
-  assert.match(context.lastRenderMessage, /restore excluded games/);
+  assert.match(elements.get("status-message").innerHTML, /restore excluded games/);
 });
 
-test("candidate exclusion is rejected without changing sample or exclusion storage", async () => {
-  const {context} = browserContext({compare: true});
-  const batch = seedComparison(context);
-  vm.runInContext("sampleEditMode = true;", context);
-  await context.onExcludeGame(batch.items[4].id);
+test("candidate exclusion cannot change the sample or the excluded-games list", () => {
+  const {context, storage, elements} = browserContext({compare: true});
+  seedComparison(context);
+  const saved = storage.get(SAMPLE_KEY);
+  context.onExcludeGame(YOUR_DESCRIPTION_ID);
   assert.equal(context.getExcludedGameIds().length, 0);
-  assert.equal(context.getBatch().id, batch.id);
-  assert.match(context.lastRenderMessage, /own description cannot be excluded/);
+  assert.equal(storage.get(SAMPLE_KEY), saved);
+  assert.match(elements.get("status-message").innerHTML, /Only a Steam game in the current sample/);
 });
 
-test("recording rechecks current exclusions and current candidate text before saving", () => {
-  const {context} = browserContext({compare: true});
+test("requesting a new sample keeps the configured description and writes no ranking records", () => {
+  const {context, storageReads, storageWrites} = browserContext({compare: true});
   seedComparison(context);
+  const beforeReads = storageReads.length;
+  const beforeWrites = storageWrites.length;
+  context.onNewSample();
+  const sample = context.getComparisonSample();
+  assert.equal(context.comparisonSampleMatchesSettings(sample, context.getSettings(), catalogueFixture()), true);
+  assert.equal(context.getSettings().description, settingsFixture().description);
+  assert.ok(storageReads.slice(beforeReads).every(key => [SETTINGS_KEY, SAMPLE_KEY, EXCLUSIONS_KEY].includes(key)));
+  assert.ok(storageWrites.slice(beforeWrites).every(key => key === SAMPLE_KEY));
+});
+
+test("generic and obsolete ranking storage is neither read nor overwritten", () => {
+  const storage = new Map([
+    ["settings", '{"description":"Other app private value","tag":"1"}'],
+    ["currentBatch", '{"shoppingCart":["private value"]}'],
+    ["surveyResults", '["another survey"]'],
+    ["excludedSteamGameIds", '["not a Steam id"]'],
+    ["steamDescriptionComparer:currentBatch", '{"id":"obsolete-batch"}'],
+    ["steamDescriptionComparer:surveyResults", '[{"id":"old-ranking"}]'],
+    ["steamDescriptionComparer:legacyImportV1", "imported"],
+  ]);
+  const originals = [...storage];
+  const {context, storageReads, storageWrites, storageDeletes} = browserContext({storage});
+  assert.equal(context.getSettings(), null);
+  assert.equal(context.getComparisonSample(), null);
+  assert.equal(context.getExcludedGameIds().length, 0);
+  context.setSettings(settingsFixture());
+  context.saveComparisonSample(sampleFixture());
   context.excludeSteamGame("steam_1", catalogueFixture());
-  context.onDone();
-  assert.equal(context.getResults().length, 0);
+  context.clearComparisonSample();
   context.restoreAllSteamGames();
-  context.setSettings({description: "Changed candidate", tag: "1", minimumReviewCount: 50});
-  context.onDone();
-  assert.equal(context.getResults().length, 0);
+  for (const [key, value] of originals) assert.equal(storage.get(key), value);
+  for (const key of [...storageReads, ...storageWrites, ...storageDeletes]) {
+    assert.ok([SETTINGS_KEY, SAMPLE_KEY, EXCLUSIONS_KEY].includes(key), "Unexpected storage access: " + key);
+  }
 });
 
-test("valid rankings retain catalogue provenance and require a complete permutation", () => {
-  const {context} = browserContext({compare: true});
+test("existing namespaced settings and exclusions remain active and unchanged on reload", () => {
+  const storage = new Map([
+    [SETTINGS_KEY, JSON.stringify(settingsFixture())],
+    [EXCLUSIONS_KEY, '["steam_2"]'],
+    ["steamDescriptionComparer:currentBatch", '{"items":["obsolete"]}'],
+    ["steamDescriptionComparer:surveyResults", '[{"id":"old-ranking"}]'],
+  ]);
+  const original = [...storage];
+  const {context, storageWrites, storageDeletes} = browserContext({storage});
+  assert.deepEqual(plain(context.getSettings()), settingsFixture());
+  assert.deepEqual(plain(context.getExcludedGameIds()), ["steam_2"]);
+  assert.equal(context.getComparisonSample(), null);
+  assert.deepEqual([...storage], original);
+  assert.equal(storageWrites.length, 0);
+  assert.equal(storageDeletes.length, 0);
+});
+
+test("unrelated storage events cannot clear or replace the displayed comparison sample", () => {
+  const {context, storage, storageListeners} = browserContext({compare: true});
   seedComparison(context);
-  vm.runInContext('getRankOrder = () => ["steam_1", "steam_1", "steam_2", "steam_3", "steam_4"];', context);
-  context.onDone();
-  assert.equal(context.getResults().length, 0);
-  vm.runInContext("getRankOrder = () => fixtureBatch.items.map(item => item.id);", context);
-  context.onDone();
-  const ranking = context.getResults()[0];
-  assert.equal(ranking.catalogueId, catalogueFixture().catalogueId);
-  assert.equal(ranking.catalogueMinimumReviewCount, 50);
-  assert.equal(ranking.reviewCountScope, catalogueFixture().reviewCountScope);
+  const saved = storage.get(SAMPLE_KEY);
+  for (const key of ["settings", "currentBatch", "excludedSteamGameIds", "steamDescriptionComparer:surveyResults"]) {
+    for (const listener of storageListeners) listener({key});
+  }
+  assert.equal(storage.get(SAMPLE_KEY), saved);
+  assert.equal(context.lastRenderMessage, undefined);
 });
 
-test("another-tab storage change cancels a sample that is still loading", async () => {
-  let releaseResponse;
-  const responsePromise = new Promise(resolve => { releaseResponse = resolve; });
-  const {context, storageListeners} = browserContext({compare: true, fetchResponse: () => responsePromise});
-  context.setSettings({description: "Candidate", tag: "1", minimumReviewCount: 50});
-  const samplePromise = context.onLoadSample();
-  storageListeners[0]({key: "steamDescriptionComparer:excludedSteamGameIds"});
-  releaseResponse({ok: true, json: async () => catalogueFixture()});
-  await samplePromise;
-  assert.equal(context.getBatch(), null);
-});
-
-test("Steam source markup cannot use injected URLs or unescaped names", () => {
+test("Steam source markup derives its URL from the canonical id and escapes visible text", () => {
   const {context} = browserContext();
-  const markup = context.steamSourceMarkup({id: "steam_123", name: "<bad>", storeUrl: "javascript:alert(1)"});
+  const markup = context.steamSourceMarkup({id: "steam_123", name: '<bad> & "quoted"', storeUrl: "javascript:alert(1)"});
   assert.ok(markup.includes("https://store.steampowered.com/app/123/"));
-  assert.ok(markup.includes("&lt;bad&gt;"));
+  assert.ok(markup.includes("&lt;bad&gt; &amp; &quot;quoted&quot;"));
   assert.ok(!markup.includes("javascript:"));
+  for (const game of [{id: YOUR_DESCRIPTION_ID, name: "Candidate"}, {id: "steam_01", name: "Bad id"}, {id: "steam_123"}]) {
+    assert.throws(() => context.steamSourceMarkup(game));
+  }
+});
+
+test("catalogue HTTP failures remain explicit without using a substitute catalogue", async () => {
+  const {context, fetchUrls} = browserContext({fetchResponse: () => ({ok: false, status: 404})});
+  await assert.rejects(context.fetchCatalogue(), /HTTP 404/);
+  await assert.rejects(context.fetchCatalogue(), /HTTP 404/);
+  assert.deepEqual(fetchUrls, ["catalogue.json"]);
 });
 
 test("public pages and dependencies use relative URLs and no private API endpoints", () => {
-  for (const filename of ["index.html", "settings.html", "compare.html", "results.html", "script.js"]) {
+  for (const filename of ["index.html", "settings.html", "compare.html", "script.js"]) {
     const contents = fs.readFileSync(path.join(staticDirectory, filename), "utf8");
     assert.doesNotMatch(contents, /["']\/api\//);
     assert.doesNotMatch(contents, /(?:href|src)=["']\//);
@@ -266,116 +484,90 @@ test("public pages and dependencies use relative URLs and no private API endpoin
 });
 
 
-function legacySteamRecords(context) {
-  const description = "A previous Steam Comparer candidate";
-  const items = [...catalogueFixture().games.slice(0, 4), {id: context.hashStr(description), text: description}];
-  const batch = {id: "batch_legacy_1", tag: "1", items};
-  const ranking = {id: "s_legacy_1", batchId: batch.id, timestamp: "2026-07-01T12:00:00Z",
-    tag: "1", items, rank: items.map(item => item.id)};
-  return {settings: {description, tag: "1"}, batch, ranking};
-}
 
-test("shared generic keys from another project are never read as active data or overwritten", () => {
-  const storage = new Map([
-    ["settings", '{"theme":"light","privateOtherAppField":"do not expose"}'],
-    ["currentBatch", '{"shoppingCart":["private value"]}'],
-    ["surveyResults", '["another survey"]'],
-    ["excludedSteamGameIds", '["not a Steam id"]'],
-  ]);
-  const originalEntries = [...storage];
-  const {context} = browserContext({storage});
-  const notice = context.migratePreviousLocalData();
-  assert.match(notice, /could not be safely imported/);
-  assert.doesNotMatch(notice, /privateOtherAppField|shoppingCart|private value|another survey/);
-  assert.equal(context.getSettings(), null);
-  assert.equal(context.getBatch(), null);
-  assert.equal(context.getResults().length, 0);
+test("a drag cannot save descriptions made ineligible by changed filters or exclusions", () => {
+  for (const invalidateSample of [
+    context => context.setSettings({...settingsFixture(), minimumReviewCount: 75}),
+    context => context.excludeSteamGame("steam_1", catalogueFixture()),
+  ]) {
+    const {context, storage, storageWrites} = browserContext({compare: true});
+    seedComparison(context);
+    invalidateSample(context);
+    const saved = storage.get(SAMPLE_KEY);
+    const beforeWrites = storageWrites.length;
+    setDraggedOrder(context, [...sampleFixture().descriptionIds].reverse());
+    context.onDescriptionsReordered();
+    assert.equal(storage.get(SAMPLE_KEY), saved);
+    assert.equal(storageWrites.length, beforeWrites);
+    assert.ok(context.lastRenderMessage);
+  }
+});
+
+test("an exclusion click from an old display cannot change a newer sample or exclusions", () => {
+  const {context, storage, storageWrites} = browserContext({compare: true});
+  seedComparison(context);
+  const newerSample = {...sampleFixture(), descriptionIds: ["steam_5", YOUR_DESCRIPTION_ID, "steam_1", "steam_4", "steam_2"]};
+  context.saveComparisonSample(newerSample);
+  const saved = storage.get(SAMPLE_KEY);
+  const beforeWrites = storageWrites.length;
+  context.onExcludeGame("steam_1");
+  assert.equal(storage.get(SAMPLE_KEY), saved);
   assert.equal(context.getExcludedGameIds().length, 0);
-  context.setSettings({description: "New candidate", tag: "1", minimumReviewCount: 50});
-  context.setBatch({id: "new-batch"});
-  context.addResult({id: "new-ranking"});
-  context.excludeSteamGame("steam_1", catalogueFixture());
-  context.clearBatch();
-  context.clearResults();
-  context.restoreAllSteamGames();
-  for (const [key, value] of originalEntries) assert.equal(storage.get(key), value);
-  for (const key of storage.keys()) assert.ok(originalEntries.some(([original]) => original === key) || key.startsWith("steamDescriptionComparer:"));
+  assert.equal(storageWrites.length, beforeWrites);
+  assert.ok(context.lastRenderMessage);
 });
 
-test("a verified previous Steam sample and rankings migrate once without deleting originals", () => {
-  const {context, storage} = browserContext();
-  const legacy = legacySteamRecords(context);
-  storage.set("settings", JSON.stringify(legacy.settings));
-  storage.set("currentBatch", JSON.stringify(legacy.batch));
-  storage.set("surveyResults", JSON.stringify([legacy.ranking]));
-  storage.set("excludedSteamGameIds", '["steam_2"]');
-  const originals = [...storage];
-  assert.match(context.migratePreviousLocalData(), /Verified previous Steam Comparer data was copied/);
-  assert.equal(context.getSettings().minimumReviewCount, 50);
-  assert.equal(context.getBatch().id, legacy.batch.id);
-  assert.equal(context.getResults()[0].id, legacy.ranking.id);
-  assert.equal(context.getExcludedGameIds()[0], "steam_2");
-  for (const [key, value] of originals) assert.equal(storage.get(key), value);
-  context.clearResults();
-  storage.set("surveyResults", JSON.stringify([{...legacy.ranking, id: "s_added_later"}]));
-  context.migratePreviousLocalData();
-  assert.equal(context.getResults().length, 0, "generic values cannot reappear after the one-time upgrade");
-});
 
-test("a plausible settings object alone is insufficient evidence to import shared data", () => {
-  const {context, storage} = browserContext();
-  storage.set("settings", JSON.stringify({description: "A game", tag: "1", minimumReviewCount: 50}));
-  assert.match(context.migratePreviousLocalData(), /could not be safely imported/);
-  assert.equal(context.getSettings(), null);
-});
-
-test("malformed Steam ranking history is not imported and its contents are not revealed", () => {
-  const {context, storage} = browserContext();
-  const legacy = legacySteamRecords(context);
-  legacy.ranking.rank[4] = legacy.ranking.rank[0];
-  storage.set("settings", JSON.stringify(legacy.settings));
-  storage.set("surveyResults", JSON.stringify([legacy.ranking]));
-  const notice = context.migratePreviousLocalData();
-  assert.match(notice, /could not be safely imported/);
-  assert.doesNotMatch(notice, /previous Steam Comparer candidate/);
-  assert.equal(context.getResults().length, 0);
-  assert.equal(context.getSettings(), null);
-});
-
-test("verified Steam history is preserved without claiming ambiguous shared settings", () => {
-  const {context, storage} = browserContext();
-  const legacy = legacySteamRecords(context);
-  storage.set("settings", '{"description":"Secret from other project","tag":"1","theme":"dark"}');
-  storage.set("surveyResults", JSON.stringify([legacy.ranking]));
-  const originalSettings = storage.get("settings");
-  assert.match(context.migratePreviousLocalData(), /Other older entries were ambiguous/);
-  assert.equal(context.getResults()[0].id, legacy.ranking.id);
-  assert.equal(context.getSettings(), null);
-  assert.equal(storage.get("settings"), originalSettings);
-});
-
-test("one-time migration never overwrites existing namespaced rankings or settings", () => {
-  const {context, storage} = browserContext();
-  const legacy = legacySteamRecords(context);
-  storage.set("settings", JSON.stringify(legacy.settings));
-  storage.set("surveyResults", JSON.stringify([legacy.ranking]));
-  context.setSettings({description: "Current candidate", tag: "21", minimumReviewCount: 200});
-  context.addResult({id: "already-saved"});
-  assert.match(context.migratePreviousLocalData(), /current data already exists/);
-  assert.equal(context.getSettings().description, "Current candidate");
-  assert.equal(context.getResults()[0].id, "already-saved");
-});
-
-test("generic storage events from another project do not cancel this tool's sample", async () => {
+test("a settings change during catalogue loading keeps the old draft from overwriting the newer draft", async () => {
   let releaseResponse;
   const responsePromise = new Promise(resolve => { releaseResponse = resolve; });
-  const {context, storageListeners} = browserContext({compare: true, fetchResponse: () => responsePromise});
-  context.setSettings({description: "Candidate", tag: "1", minimumReviewCount: 50});
-  const samplePromise = context.onLoadSample();
-  storageListeners[0]({key: "settings"});
-  storageListeners[0]({key: "currentBatch"});
-  storageListeners[0]({key: "excludedSteamGameIds"});
+  const olderSettings = settingsFixture();
+  const newerSettings = {...olderSettings, description: "A newer draft saved in another tab"};
+  const storage = new Map([[SETTINGS_KEY, JSON.stringify(olderSettings)]]);
+  const {context, elements, storageListeners, storageWrites} = browserContext({settings: true, storage, fetchResponse: () => responsePromise});
+  const initialization = context.init();
+  assert.equal(elements.get("description").value, olderSettings.description);
+  assert.equal(elements.get("save-btn").disabled, true);
+  storage.set(SETTINGS_KEY, JSON.stringify(newerSettings));
+  for (const listener of storageListeners) listener({key: SETTINGS_KEY});
   releaseResponse({ok: true, json: async () => catalogueFixture()});
-  await samplePromise;
-  assert.equal(context.getBatch().items.length, 5);
+  await initialization;
+  assert.match(elements.get("catalogue-details").textContent, /8 games across 2 genres/);
+  assert.equal(elements.get("tag").value, "1");
+  assert.equal(elements.get("save-btn").disabled, true);
+  assert.match(elements.get("status-message").innerHTML, /Settings changed in another tab/);
+  elements.get("save-btn").click();
+  assert.deepEqual(plain(context.getSettings()), newerSettings);
+  assert.equal(storageWrites.length, 0);
+  assert.equal(context.window.location.href, "");
+});
+
+test("same-catalogue corrupt sample references fail visibly and stay saved until explicit New sample", () => {
+  for (const mutate of [
+    sample => { sample.descriptionIds[0] = "steam_999"; },
+    sample => { sample.descriptionIds[0] = "steam_7"; },
+    sample => { sample.minimumReviewCount = 100; },
+  ]) {
+    const {context, storage, elements, storageWrites, storageDeletes} = browserContext({compare: true, realComparisonRenderer: true});
+    context.setSettings(settingsFixture());
+    const corruptedSample = sampleFixture();
+    mutate(corruptedSample);
+    context.saveComparisonSample(corruptedSample);
+    const saved = storage.get(SAMPLE_KEY);
+    const beforeWrites = storageWrites.length;
+    const beforeDeletes = storageDeletes.length;
+    assert.throws(() => context.comparisonGames(catalogueFixture(), corruptedSample));
+    context.renderComparisonPage();
+    assert.equal(storage.get(SAMPLE_KEY), saved);
+    assert.equal(storageWrites.length, beforeWrites);
+    assert.equal(storageDeletes.length, beforeDeletes);
+    assert.match(elements.get("status-message").innerHTML, /comparison|sample|genre|minimum/i);
+    assert.match(elements.get("main-area").innerHTML, /New sample/);
+    assert.equal(vm.runInContext("currentlyDisplayedComparisonSample", context), null);
+    context.onNewSample();
+    const replacement = context.getComparisonSample();
+    assert.equal(context.comparisonSampleMatchesSettings(replacement, context.getSettings(), catalogueFixture()), true);
+    assert.notEqual(storage.get(SAMPLE_KEY), saved);
+    assert.doesNotMatch(elements.get("main-area").innerHTML, /No comparison sample to show/);
+  }
 });
