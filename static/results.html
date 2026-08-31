@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Results - Steam Comparer</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Results</h1>
+    <nav aria-label="Main navigation">
+      <a href="settings.html">Settings</a>
+      <a href="compare.html">Compare</a>
+      <a href="results.html" aria-current="page">Results</a>
+    </nav>
+  </header>
+  <p id="legacy-import-notice" class="page-note" role="status"></p>
+
+  <div id="content"></div>
+  <p class="page-note">Rankings are stored in this browser and are not uploaded by this tool. Other pages on the same web origin can access browser storage. Download JSON to keep a copy. Excluding a game changes future samples; it does not remove earlier rankings.</p>
+</div>
+<script src="script.js?v=4"></script>
+<script>
+function render() {
+  const results = getResults();
+  const content = document.getElementById("content");
+
+  if (results.length === 0) {
+    content.innerHTML =
+      '<div class="empty-state"><h3>No results yet</h3><p>Complete some rankings on the <a href="compare.html">Compare</a> page first.</p></div>';
+    return;
+  }
+
+  const allStats = computeItemStats(results);
+  const summaries = allStats.map(s => itemSummary(s)).filter(Boolean);
+  const experimentalList = summaries.filter(s => s.isExperimental);
+  const steamGames = summaries.filter(s => !s.isExperimental);
+  const recordedReviewMinimumLabels = results.map(sessionReviewMinimumLabel);
+  const hasMixedReviewMinimums = new Set(recordedReviewMinimumLabels).size > 1;
+  const hasMixedCatalogues = new Set(results.map(session => session.catalogueId || "legacy-live-steam")).size > 1;
+
+  let html = "";
+  html += '<div class="actions" style="margin-bottom:24px;">';
+  html += '<button id="export-btn" class="btn btn-secondary">Download JSON</button>';
+  html += '<button id="clear-btn" class="btn btn-danger">Clear All</button>';
+  html += '</div>';
+
+  // ── Leaderboard ──
+  if (steamGames.length > 0 || experimentalList.length > 0) {
+    const allGames = [...steamGames, ...experimentalList];
+    const sorted = allGames.sort((a, b) => b.avgScore - a.avgScore);
+    html += '<h3 style="margin-top:24px;">Per-Game Leaderboard</h3>';
+    if (hasMixedCatalogues) {
+      html += '<p class="status status-info">This leaderboard combines rankings from different catalogues or earlier live Steam samples. Catalogue details are recorded per session below.</p>';
+    }
+    if (hasMixedReviewMinimums) {
+      html += '<p class="status status-info">This leaderboard combines sessions with different or unrecorded review minimums. Check the minimum shown for each session when comparing scores.</p>';
+    }
+    html += '<div class="table-scroll"><table class="leaderboard-table">';
+    html += '<thead><tr><th></th><th>Avg</th><th>Score</th><th>Freq</th><th colspan="5" style="text-align:center;">Position count</th><th>Reviews</th><th>Game</th><th>Description</th></tr></thead>';
+    html += '<thead><tr><th></th><th></th><th></th><th></th><th style="font-size:11px;">1st</th><th style="font-size:11px;">2nd</th><th style="font-size:11px;">3rd</th><th style="font-size:11px;">4th</th><th style="font-size:11px;">5th</th><th></th><th></th><th></th></tr></thead>';
+    html += '<tbody>';
+    var globalMax = 0;
+    for (var ci = 0; ci < sorted.length; ci++) {
+      for (var cj = 0; cj < 5; cj++) {
+        if (sorted[ci].dist[cj] > globalMax) globalMax = sorted[ci].dist[cj];
+      }
+    }
+    var posColors = ["#4caf50","#8bc34a","#ffeb3b","#ff9800","#f44336"];
+    var maxReviews = 0;
+    for (var ri = 0; ri < sorted.length; ri++) {
+      if (sorted[ri].reviews > maxReviews) maxReviews = sorted[ri].reviews;
+    }
+    function reviewColor(val) {
+      if (maxReviews === 0 || !val) return "var(--text2)";
+      var t = Math.min(val / maxReviews, 1);
+      var colors = [
+        {pos:0, r:128, g:0, b:128}, {pos:0.33, r:200, g:0, b:0},
+        {pos:0.66, r:255, g:165, b:0}, {pos:1, r:255, g:255, b:0},
+      ];
+      for (var ci = 0; ci < colors.length - 1; ci++) {
+        if (t >= colors[ci].pos && t <= colors[ci+1].pos) {
+          var f = (t - colors[ci].pos) / (colors[ci+1].pos - colors[ci].pos);
+          var r = Math.round(colors[ci].r + (colors[ci+1].r - colors[ci].r) * f);
+          var g = Math.round(colors[ci].g + (colors[ci+1].g - colors[ci].g) * f);
+          var b = Math.round(colors[ci].b + (colors[ci+1].b - colors[ci].b) * f);
+          return "rgb(" + r + "," + g + "," + b + ")";
+        }
+      }
+      return "rgb(255,255,0)";
+    }
+    for (let i = 0; i < sorted.length; i++) {
+      const g = sorted[i];
+      if (g.n === 0) continue;
+      const isExp = g.isExperimental;
+      html += '<tr class="' + (isExp ? 'row-experimental' : '') + '">';
+      html += '<td class="leaderboard-rank">#' + (i + 1) + '</td>';
+      html += '<td><strong>' + g.avgScore + '</strong></td>';
+      html += '<td>' + g.totalScore + '</td>';
+      html += '<td>' + g.n + '</td>';
+      for (var pi = 0; pi < 5; pi++) {
+        var opacity = globalMax > 0 ? (g.dist[pi] / globalMax) : 0;
+        html += '<td style="font-size:12px;text-align:center;"><span style="display:inline-block;min-width:20px;padding:1px 4px;border-radius:4px;background:' + posColors[pi] + '20;color:' + posColors[pi] + ';font-weight:600;opacity:' + opacity + ';">' + g.dist[pi] + '</span></td>';
+      }
+      var revColor = isExp ? 'var(--text2)' : reviewColor(g.reviews);
+      html += '<td style="font-size:12px;text-align:right;font-weight:600;color:' + revColor + ';">' + (isExp || !g.reviews ? '—' : numberShort(g.reviews)) + '</td>';
+      html += '<td class="game-source">' + (isExp ? 'Your description' : steamSourceMarkup(g)) + '</td>';
+      var fullText = escapeHtml(g.text);
+      var displayText = isExp ? fullText : escapeHtml(g.text.slice(0, 60)) + '...';
+      html += '<td class="desc-cell' + (isExp ? ' desc-experimental' : ' desc-steam') + '" data-full="' + fullText.replace(/"/g,'&quot;') + '" onclick="toggleDesc(this);" style="cursor:pointer;">' + displayText + '</td>';
+      html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+    html += '<p class="page-note">Reviews are the saved counts at collection. New catalogue sessions count Steam purchases in all languages, including positive and negative reviews and excluding off-topic activity.</p>';
+  }
+
+  // ── Session Log ──
+  html += '<div class="results-section" style="margin-top:48px;">';
+  html += '<h2>Session Log (' + results.length + ')</h2>';
+  for (let i = results.length - 1; i >= 0; i--) {
+    const s = results[i];
+    html += '<div class="session-item">';
+    html += '<div class="session-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\'">';
+    html += '<span>#' + (i + 1) + ' — <span class="session-timestamp">' + formatTimestamp(s.timestamp) + '</span><br><span style="font-size:12px;color:var(--text2);">' + escapeHtml(recordedReviewMinimumLabels[i] + " · " + sessionCatalogueLabel(s)) + '</span></span>';
+    html += '<span style="font-size:12px;color:var(--text2);">batch: ' + (s.batchId ? escapeHtml(s.batchId.slice(0, 16)) + '...' : '—') + '</span>';
+    html += '</div>';
+    html += '<div class="session-details" style="display:none;">';
+    html += '<ol>';
+    for (const id of s.rank) {
+      const item = s.items ? s.items.find(it => it.id === id) : null;
+      const label = item ? escapeHtml(item.text.slice(0, 80)) + (item.text.length > 80 ? '...' : '') : escapeHtml(id);
+      const isExp = id.startsWith("exp_") || id === "experimental";
+      html += '<li>' + label + (isExp ? ' <span class="badge-experimental">your description</span>' : (item ? ' · ' + steamSourceMarkup(item) : '')) + '</li>';
+    }
+    html += '</ol>';
+    html += '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+
+  content.innerHTML = html;
+
+  document.getElementById("export-btn").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(results, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "steam_comparer_results.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  var clearBtn = document.getElementById("clear-btn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      if (confirm("Clear all survey results?")) {
+        clearResults();
+        render();
+      }
+    });
+  }
+}
+
+function sessionReviewMinimumLabel(session) {
+  if (!Object.prototype.hasOwnProperty.call(session, "minimumReviewCount")) {
+    return "Review minimum not recorded";
+  }
+  const recordedMinimumReviewCount = session.minimumReviewCount;
+  if (!Number.isSafeInteger(recordedMinimumReviewCount) || recordedMinimumReviewCount < 0) {
+    return "Review minimum invalid";
+  }
+  if (recordedMinimumReviewCount === 0) return session.catalogueId ? "All catalogue games (library minimum " + session.catalogueMinimumReviewCount + " reviews)" : "No review minimum";
+  return "Minimum reviews: " + recordedMinimumReviewCount.toLocaleString();
+}
+
+function sessionCatalogueLabel(session) {
+  if (!session.catalogueId) return "Earlier live Steam sample; catalogue not recorded";
+  return "Catalogue " + session.catalogueId + (session.catalogueCollectedAt ? " · collected " + new Date(session.catalogueCollectedAt).toLocaleDateString() : "");
+}
+
+function numberShort(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'm';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function toggleDesc(el) {
+  if (el.classList.contains("expanded")) {
+    el.classList.remove("expanded");
+    var text = el.getAttribute("data-full");
+    el.innerHTML = text.length > 60 ? escapeHtml(text.slice(0, 60)) + "..." : escapeHtml(text);
+  } else {
+    el.classList.add("expanded");
+    el.innerHTML = escapeHtml(el.getAttribute("data-full"));
+  }
+}
+
+function renderScorecard(s) {
+  let html = '<div class="scorecard">';
+  html += '<div class="scorecard-header">';
+  html += '<div class="scorecard-title">' + (s.isExperimental ? 'Your Description' : escapeHtml(s.text.slice(0, 60)) + '...') + '</div>';
+  html += '<div class="scorecard-stats">';
+  html += '<span>Score: <strong class="stat-highlight">' + s.totalScore + ' pts</strong></span>';
+  html += '<span>Avg: <strong>' + s.avgScore + '</strong></span>';
+  html += '<span>Position: <strong>' + s.avgPos + '</strong></span>';
+  html += '<span>Variance: <strong>' + s.variance + '</strong></span>';
+  html += '<span>Appearances: <strong>' + s.n + '</strong></span>';
+  html += '</div>';
+  html += '</div>';
+
+  if (s.text) {
+    html += '<p style="font-size:13px;margin-bottom:12px;padding:8px;background:var(--surface2);border-radius:6px;">' + escapeHtml(s.text) + '</p>';
+  }
+
+  const distPct = s.dist.map(d => Math.round((d / (s.n || 1)) * 100));
+  html += '<div class="histogram">';
+  const labels = ["1st", "2nd", "3rd", "4th", "5th"];
+  const colors = ["#4caf50", "#8bc34a", "#ffeb3b", "#ff9800", "#f44336"];
+  for (let i = 0; i < 5; i++) {
+    html += '<div class="histogram-row">';
+    html += '<div class="histogram-label">' + labels[i] + '</div>';
+    html += '<div class="histogram-bar" style="width:' + distPct[i] + '%;background:' + colors[i] + ';"></div>';
+    html += '<div class="histogram-pct">' + distPct[i] + '%</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+
+  html += '</div>';
+  return html;
+}
+
+try { initializeBrowserStorage(); render(); } catch (error) { document.getElementById("content").textContent = error.message; }
+window.addEventListener("storage", event => {
+  if (event.key === null || event.key === RESULTS_STORAGE_KEY) {
+    try { render(); } catch (error) { document.getElementById("content").textContent = error.message; }
+  }
+});
+</script>
+</body>
+</html>

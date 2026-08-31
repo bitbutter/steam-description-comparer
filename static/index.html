@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Steam Comparer</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Steam Comparer</h1>
+    <nav>
+      <a href="settings.html">Settings</a>
+      <a href="compare.html">Compare</a>
+      <a href="results.html">Results</a>
+    </nav>
+  </header>
+  <p id="legacy-import-notice" class="page-note" role="status"></p>
+  <div class="hero">
+    <h2>Game Description Market Research</h2>
+    <p>Compare your game description against Steam games with an audience. Rank five descriptions, then see where yours places.</p>
+    <p style="color:var(--accent);font-size:14px;margin-top:8px">Start by entering your game description and picking a genre in <a href="settings.html" style="color:var(--accent);text-decoration:underline">Settings</a>.</p>
+    <div class="hero-links">
+      <a href="settings.html" class="btn btn-primary btn-block">Settings</a>
+      <a href="compare.html" class="btn btn-secondary btn-block">Compare</a>
+      <a href="results.html" class="btn btn-secondary btn-block">Results</a>
+    </div>
+  </div>
+  <p id="catalogue-details" class="page-note"></p>
+  <p class="page-note">Free to use. Your descriptions, rankings, and excluded games stay in this browser. They are not uploaded by this tool. Other pages hosted on the same web origin can access browser storage. No accounts or live Steam requests. The fixed catalogue starts at 50 reviews per game; counts are a proxy for audience size, not quality.</p>
+  <p class="page-note">Use Edit sample to exclude familiar games. Names and review counts stay hidden while ranking.</p>
+  <p class="page-note">Steam descriptions belong to their respective owners. This tool is not affiliated with Valve or Steam. The website host receives normal page requests.</p>
+</div>
+<script src="script.js?v=4"></script>
+<script>
+Promise.resolve().then(() => { initializeBrowserStorage(); return fetchCatalogue(); }).then(catalogue => { document.getElementById("catalogue-details").textContent = catalogueSummary(catalogue); }).catch(error => { document.getElementById("catalogue-details").textContent = error.message; });
+</script>
+</body>
+</html>

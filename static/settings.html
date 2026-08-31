@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings - Steam Comparer</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <header><h1>Settings</h1><nav aria-label="Main navigation">
+    <a href="settings.html" aria-current="page">Settings</a><a href="compare.html">Compare</a><a href="results.html">Results</a>
+  </nav></header>
+  <p id="legacy-import-notice" class="page-note" role="status"></p>
+  <div id="status-message" role="status" aria-live="polite"></div>
+  <div class="form-group">
+    <label for="description">Your game description</label>
+    <p>Paste the description you want to test. It will be mixed in with four Steam descriptions.</p>
+    <textarea id="description" placeholder="A tactical deckbuilding roguelike where..." rows="5"></textarea>
+  </div>
+  <div class="form-group">
+    <label for="tag">Genre tag</label>
+    <p>Sample randomly from this genre in the saved catalogue. Games can belong to more than one genre.</p>
+    <select id="tag"><option value="">Loading genres…</option></select>
+  </div>
+  <div class="form-group">
+    <label for="minimum-review-count">Minimum Steam reviews</label>
+    <p>Review count is a proxy for audience size, not review score. Counts include positive and negative Steam-purchase reviews in all languages, excluding off-topic activity. Set 0 to use every eligible game in the catalogue; the catalogue itself only contains games with at least 50 reviews.</p>
+    <input id="minimum-review-count" type="number" min="0" step="1" value="50" required>
+    <p id="eligible-game-count" class="page-note" aria-live="polite"></p>
+  </div>
+  <div class="actions"><button id="save-btn" class="btn btn-primary btn-block" disabled>Save settings</button></div>
+  <section class="settings-section" aria-labelledby="exclusions-heading">
+    <h2 id="exclusions-heading">Excluded games</h2>
+    <p>Use Edit sample on Compare to exclude a Steam game. It stays out of future samples in this browser until you restore it here. Recorded rankings are unchanged.</p>
+    <div id="excluded-games-list"></div>
+  </section>
+  <p id="catalogue-details" class="page-note"></p>
+  <p class="page-note">Your description, rankings, settings, and excluded games are saved in this browser profile. Other pages hosted on the same web origin can access browser storage. They are not uploaded or synced by this tool. Clearing site data removes them; private browsing may remove them when the window closes. No account needed.</p>
+  <p class="page-note">This site serves a fixed catalogue, not live Steam data. Steam descriptions belong to their respective owners. This tool is not affiliated with Valve or Steam. The website host receives normal page requests.</p>
+</div>
+<script src="script.js?v=4"></script>
+<script>
+let settingsCatalogue = null;
+
+function showSettingsStatus(message, success = false) {
+  document.getElementById("status-message").innerHTML = '<div class="status ' +
+    (success ? 'status-success' : 'status-info') + '">' + escapeHtml(message) + '</div>';
+}
+
+function renderEligibleGameCount() {
+  if (!settingsCatalogue) return;
+  const genreId = document.getElementById("tag").value;
+  const countElement = document.getElementById("eligible-game-count");
+  if (!genreId) { countElement.textContent = "Select a genre to see how many games are available."; return; }
+  try {
+    const minimumReviewCount = document.getElementById("minimum-review-count").valueAsNumber;
+    const eligibleCount = getEligibleGames(settingsCatalogue, genreId, minimumReviewCount).length;
+    countElement.textContent = eligibleCount.toLocaleString() + " games match this minimum and your exclusions." +
+      (eligibleCount < 4 ? " A sample needs at least four." : "");
+  } catch (error) { countElement.textContent = error.message; }
+}
+
+function renderExcludedGames() {
+  const container = document.getElementById("excluded-games-list");
+  try {
+    const excludedGameIds = getExcludedGameIds();
+    if (!excludedGameIds.length) { container.innerHTML = '<p>No games excluded.</p>'; return; }
+    const gamesById = new Map(settingsCatalogue.games.map(game => [game.id, game]));
+    let html = '<p>' + excludedGameIds.length.toLocaleString() + (excludedGameIds.length === 1 ? ' excluded game.' : ' excluded games.') + '</p><ul class="excluded-games">';
+    for (const gameId of excludedGameIds) {
+      const game = gamesById.get(gameId);
+      html += '<li><div>' + (game ? escapeHtml(game.name) : escapeHtml(gameId) + ' (not in this catalogue)') +
+        '</div><button class="btn btn-secondary restore-game-btn" data-game-id="' + escapeHtml(gameId) + '">Restore</button></li>';
+    }
+    container.innerHTML = html + '</ul><button id="restore-all-btn" class="btn btn-secondary">Restore all excluded games</button>';
+    container.querySelectorAll(".restore-game-btn").forEach(button => button.addEventListener("click", () => {
+      try {
+        restoreSteamGame(button.dataset.gameId);
+        renderExcludedGames();
+        renderEligibleGameCount();
+        showSettingsStatus("Game restored to future samples. Recorded rankings are unchanged.", true);
+      } catch (error) { showSettingsStatus(error.message); }
+    }));
+    document.getElementById("restore-all-btn").addEventListener("click", () => {
+      if (!confirm("Restore every excluded game to future samples in this browser?")) return;
+      try {
+        restoreAllSteamGames();
+        renderExcludedGames();
+        renderEligibleGameCount();
+        showSettingsStatus("All excluded games restored.", true);
+      } catch (error) { showSettingsStatus(error.message); }
+    });
+  } catch (error) {
+    container.textContent = error.message;
+  }
+}
+
+async function init() {
+  const descriptionElement = document.getElementById("description");
+  const genreElement = document.getElementById("tag");
+  const minimumElement = document.getElementById("minimum-review-count");
+  const saveButton = document.getElementById("save-btn");
+  let saved;
+  try {
+    initializeBrowserStorage();
+    saved = getSettings();
+    if (saved) {
+      descriptionElement.value = saved.description || "";
+      minimumElement.value = saved.minimumReviewCount;
+    }
+    settingsCatalogue = await fetchCatalogue();
+    const genres = await fetchTags();
+    genreElement.innerHTML = '<option value="">Select a genre…</option>';
+    for (const genre of genres) {
+      const option = document.createElement("option");
+      option.value = genre.id;
+      option.textContent = genre.name + " (" + genre.catalogueCount.toLocaleString() + " in catalogue)";
+      if (saved && String(saved.tag) === String(genre.id)) option.selected = true;
+      genreElement.appendChild(option);
+    }
+    document.getElementById("catalogue-details").textContent = catalogueSummary(settingsCatalogue);
+    renderExcludedGames();
+    renderEligibleGameCount();
+    saveButton.disabled = false;
+  } catch (error) {
+    genreElement.innerHTML = '<option value="">Unable to load settings</option>';
+    showSettingsStatus(error.message);
+  }
+  genreElement.addEventListener("change", renderEligibleGameCount);
+  minimumElement.addEventListener("input", renderEligibleGameCount);
+  saveButton.addEventListener("click", () => {
+    try {
+      const description = descriptionElement.value.trim();
+      const tag = genreElement.value;
+      if (!description) throw new Error("Please enter a description.");
+      if (!tag) throw new Error("Please select a genre tag.");
+      const minimumReviewCount = minimumElement.valueAsNumber;
+      validateMinimumReviewCount(minimumReviewCount);
+      const previousSettings = getSettings();
+      const nextSettings = { description, tag, minimumReviewCount };
+      const samplingChanged = !batchMatchesSamplingSettings(previousSettings, nextSettings);
+      const eligibleCount = getEligibleGames(settingsCatalogue, tag, minimumReviewCount).length;
+      setSettings(nextSettings);
+      if (samplingChanged || eligibleCount < 4) clearBatch();
+      showSettingsStatus(eligibleCount < 4 ?
+        "Settings saved, but fewer than four games are eligible. Lower the review minimum, choose another genre, or restore excluded games." :
+        (samplingChanged ? "Settings saved. Load a new sample on Compare. Previous rankings are unchanged." : "Settings saved."),
+        eligibleCount >= 4);
+      renderEligibleGameCount();
+    } catch (error) { showSettingsStatus(error.message); }
+  });
+}
+
+window.addEventListener("storage", event => {
+  if (settingsCatalogue && (event.key === null || event.key === EXCLUDED_GAMES_STORAGE_KEY)) {
+    renderExcludedGames();
+    renderEligibleGameCount();
+  }
+  if (event.key === null || event.key === SETTINGS_STORAGE_KEY) showSettingsStatus("Settings changed in another tab. Reload this page before making further changes.");
+});
+init();
+</script>
+</body>
+</html>

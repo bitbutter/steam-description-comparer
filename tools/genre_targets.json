@@ -1,0 +1,17 @@
+[
+  {"id": 1, "name": "Action"},
+  {"id": 21, "name": "Adventure"},
+  {"id": 9, "name": "Strategy"},
+  {"id": 122, "name": "RPG"},
+  {"id": 23, "name": "Simulation"},
+  {"id": 32, "name": "Puzzle"},
+  {"id": 28, "name": "Casual"},
+  {"id": 12, "name": "Sports"},
+  {"id": 43, "name": "Racing"},
+  {"id": 492, "name": "Indie"},
+  {"id": 1131, "name": "Deckbuilding"},
+  {"id": 4182, "name": "Roguelike"},
+  {"id": 114, "name": "Card Game"},
+  {"id": 493, "name": "Early Access"},
+  {"id": 534, "name": "Open World"}
+]

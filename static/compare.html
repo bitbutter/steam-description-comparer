@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compare - Steam Comparer</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <header><h1>Compare</h1><nav aria-label="Main navigation">
+    <a href="settings.html">Settings</a><a href="compare.html" aria-current="page">Compare</a><a href="results.html">Results</a>
+  </nav></header>
+  <p id="legacy-import-notice" class="page-note" role="status"></p>
+  <div id="status-message" role="status" aria-live="polite"></div>
+  <div id="main-area"></div>
+  <div id="actions-area" class="actions"></div>
+  <p id="catalogue-details" class="page-note"></p>
+  <p class="page-note">Your description, rankings, and excluded games stay in this browser. No account needed.
+    Exclusions belong to this tool in this browser profile. They are not uploaded by this tool; other pages on the same web origin can access browser storage. Clearing site data removes them.</p>
+</div>
+<script src="vendor/sortable.min.js"></script>
+<script src="script.js?v=4"></script>
+<script>
+let sortable = null;
+let comparisonCatalogue = null;
+let currentlyDisplayedBatchId = null;
+let sampleLoadInProgress = false;
+let sampleEditMode = false;
+let sampleOperationRevision = 0;
+let recordingAvailableAt = 0;
+let recordingButtonTimeout = null;
+
+function showStatus(message, success = false) {
+  const status = document.getElementById("status-message");
+  status.innerHTML = message ? '<div class="status ' + (success ? 'status-success' : 'status-info') + '">' + escapeHtml(message) + '</div>' : "";
+}
+
+async function init() {
+  document.getElementById("main-area").innerHTML = '<p>Loading the game catalogue…</p>';
+  try {
+    initializeBrowserStorage();
+    comparisonCatalogue = await fetchCatalogue();
+    document.getElementById("catalogue-details").textContent = catalogueSummary(comparisonCatalogue);
+    renderPage();
+  } catch (error) {
+    document.getElementById("main-area").innerHTML = '<p>The comparison sample is unavailable.</p>';
+    showStatus(error.message);
+  }
+}
+
+function renderPage(message = "") {
+  if (sortable) { sortable.destroy(); sortable = null; }
+  clearTimeout(recordingButtonTimeout);
+  currentlyDisplayedBatchId = null;
+  const main = document.getElementById("main-area");
+  const actions = document.getElementById("actions-area");
+  actions.innerHTML = "";
+  showStatus(message);
+  if (!comparisonCatalogue) return;
+  try {
+    const settings = getSettings();
+    if (!settings || !settings.description || !settings.tag) {
+      main.innerHTML = '<div class="empty-state"><p>Enter your game description and select a genre in <a href="settings.html">Settings</a>.</p></div>';
+      return;
+    }
+    validateMinimumReviewCount(settings.minimumReviewCount);
+    const eligibleGames = getEligibleGames(comparisonCatalogue, settings.tag, settings.minimumReviewCount);
+    let batch = getBatch();
+    if (batch && !batchMatchesCatalogueSettings(batch, settings, comparisonCatalogue)) {
+      clearBatch();
+      batch = null;
+      if (!message) showStatus("The catalogue, settings, or excluded games changed. Load a new sample. Previous rankings are unchanged.");
+    }
+    if (eligibleGames.length < 4) {
+      clearBatch();
+      sampleEditMode = false;
+      main.innerHTML = '<div class="empty-state"><h3>Not enough games for a sample</h3><p>Only ' + eligibleGames.length +
+        ' games match your current settings and exclusions. A sample needs four.</p><p>Lower the review minimum, choose another genre, or restore excluded games in <a href="settings.html">Settings</a>.</p></div>';
+      return;
+    }
+    if (batch) {
+      const candidate = batch.items.find(isCandidateDescription);
+      if (candidate.text !== settings.description) {
+        candidate.text = settings.description;
+        candidate.id = hashStr(settings.description);
+        batch.id = createId("batch");
+        shuffleArray(batch.items);
+        setBatch(batch);
+        if (!message) showStatus("Your description changed. Review the updated sample before recording.");
+      }
+      currentlyDisplayedBatchId = batch.id;
+      renderRankList(batch.items);
+      actions.innerHTML = sampleEditMode ?
+        '<button id="finish-edit-btn" class="btn btn-primary">Done editing · start ranking</button><button id="new-batch-btn" class="btn btn-secondary">New sample</button>' :
+        '<button id="done-btn" class="btn btn-primary">Record my ranking</button><button id="edit-sample-btn" class="btn btn-secondary">Edit sample</button><button id="new-batch-btn" class="btn btn-secondary">New sample</button>';
+      document.getElementById("new-batch-btn").addEventListener("click", onNewBatch);
+      if (sampleEditMode) document.getElementById("finish-edit-btn").addEventListener("click", finishEditing);
+      else {
+        document.getElementById("edit-sample-btn").addEventListener("click", beginEditing);
+        const recordButton = document.getElementById("done-btn");
+        recordButton.addEventListener("click", onDone);
+        if (Date.now() < recordingAvailableAt) {
+          recordButton.disabled = true;
+          recordingButtonTimeout = setTimeout(() => {
+            const currentRecordButton = document.getElementById("done-btn");
+            if (currentRecordButton) currentRecordButton.disabled = sampleLoadInProgress;
+          }, recordingAvailableAt - Date.now());
+        }
+      }
+    } else {
+      sampleEditMode = false;
+      main.innerHTML = '<div class="empty-state"><h3>Ready to collect rankings?</h3><p>Load four Steam descriptions from your selected genre, mixed with your own description.</p>' +
+        '<p>' + eligibleGames.length.toLocaleString() + ' games currently match your settings and exclusions.</p>' +
+        '<button id="load-btn" class="btn btn-primary">Load new sample</button></div>';
+      document.getElementById("load-btn").addEventListener("click", onLoadSample);
+    }
+    if (sampleLoadInProgress) disableComparisonButtons();
+  } catch (error) {
+    main.innerHTML = '<div class="empty-state"><p>Check your saved settings in <a href="settings.html">Settings</a>.</p><button id="reset-sample-btn" class="btn btn-secondary">New sample</button></div>';
+    document.getElementById("reset-sample-btn").addEventListener("click", onNewBatch);
+    showStatus(error.message);
+  }
+}
+
+function disableComparisonButtons() {
+  document.querySelectorAll("#main-area button, #actions-area button").forEach(button => { button.disabled = true; });
+}
+
+function renderRankList(items) {
+  const main = document.getElementById("main-area");
+  let html = sampleEditMode ?
+    '<p class="status status-info">Edit sample: game names and review counts are visible here. Exclude any games you do not want to use. Your own description stays in the sample. Rankings cannot be recorded while editing.</p>' :
+    '<p>Drag to rank from <strong>most interesting</strong> (top) to <strong>least interesting</strong> (bottom). You can also use the up and down buttons.</p>';
+  html += '<ul id="rank-list"' + (sampleEditMode ? ' class="sample-editing"' : '') + '>';
+  const rankColors = ["#4caf50", "#8bc34a", "#ffeb3b", "#ff9800", "#f44336"];
+  items.forEach((item, index) => {
+    html += '<li class="card" data-id="' + escapeHtml(item.id) + '">';
+    if (!sampleEditMode) html += '<div class="card-drag-handle" aria-hidden="true">&#x2630;</div><span class="rank-badge" style="background:' + rankColors[index] + ';">#' + (index + 1) + '</span>';
+    html += '<div class="card-body"><div class="card-text">' + escapeHtml(item.text) + '</div>';
+    if (sampleEditMode) {
+      html += isCandidateDescription(item) ? '<p class="card-source candidate-label">Your description · always included</p>' :
+        '<p class="card-source">' + steamSourceMarkup(item) + ' · ' + item.reviews.toLocaleString() +
+        ' qualifying reviews at collection</p><button class="btn btn-secondary exclude-game-btn" data-game-id="' +
+        escapeHtml(item.id) + '">Exclude this game</button>';
+    }
+    html += '</div>';
+    if (!sampleEditMode) html += '<div class="rank-controls"><button class="rank-move-up" aria-label="Move description up">↑</button><button class="rank-move-down" aria-label="Move description down">↓</button></div>';
+    html += '</li>';
+  });
+  main.innerHTML = html + '</ul>';
+  if (sampleEditMode) {
+    main.querySelectorAll(".exclude-game-btn").forEach(button => {
+      button.addEventListener("click", () => onExcludeGame(button.dataset.gameId));
+    });
+    return;
+  }
+  const list = document.getElementById("rank-list");
+  sortable = new Sortable(list, {
+    animation: 200, ghostClass: "sortable-ghost", chosenClass: "sortable-chosen",
+    delay: 150, delayOnTouchOnly: true, touchStartThreshold: 5,
+    filter: "button", preventOnFilter: false, onEnd: refreshBadges,
+  });
+  list.querySelectorAll(".rank-move-up, .rank-move-down").forEach(button => {
+    button.addEventListener("click", () => {
+      const card = button.closest(".card");
+      if (button.classList.contains("rank-move-up") && card.previousElementSibling) list.insertBefore(card, card.previousElementSibling);
+      if (button.classList.contains("rank-move-down") && card.nextElementSibling) list.insertBefore(card.nextElementSibling, card);
+      refreshBadges();
+      button.focus();
+    });
+  });
+  refreshBadges();
+}
+
+function refreshBadges() {
+  const rankColors = ["#4caf50", "#8bc34a", "#ffeb3b", "#ff9800", "#f44336"];
+  document.querySelectorAll("#rank-list .card").forEach((card, index, cards) => {
+    const badge = card.querySelector(".rank-badge");
+    badge.textContent = "#" + (index + 1);
+    badge.style.background = rankColors[index];
+    card.querySelector(".rank-move-up").disabled = index === 0;
+    card.querySelector(".rank-move-down").disabled = index === cards.length - 1;
+  });
+}
+
+function getRankOrder() { return sortable ? sortable.toArray() : []; }
+
+function beginEditing() {
+  if (sampleLoadInProgress) return;
+  sampleEditMode = true;
+  renderPage();
+}
+
+function finishEditing() {
+  if (sampleLoadInProgress) return;
+  try {
+    const batch = getBatch();
+    if (batch && batch.id === currentlyDisplayedBatchId) {
+      shuffleArray(batch.items);
+      setBatch(batch);
+    }
+    sampleEditMode = false;
+    renderPage("The order has been reset. Pass the sample to a rater who has not seen the game names.");
+  } catch (error) { showStatus(error.message); }
+}
+
+function onDone() {
+  if (sampleEditMode || sampleLoadInProgress || Date.now() < recordingAvailableAt) return;
+  try {
+    const settings = getSettings();
+    const batch = getBatch();
+    if (!settings || !batch || !batchMatchesCatalogueSettings(batch, settings, comparisonCatalogue) ||
+        batch.id !== currentlyDisplayedBatchId || batch.items.find(isCandidateDescription).text !== settings.description) {
+      renderPage("The sample, settings, or excluded games changed. Review the current sample before recording.");
+      return;
+    }
+    const rank = getRankOrder();
+    if (rank.length !== 5 || new Set(rank).size !== 5 || rank.some(id => !batch.items.some(item => item.id === id))) {
+      throw new Error("Please finish ranking all five descriptions.");
+    }
+    addResult({
+      id: createId("s"), timestamp: new Date().toISOString(), batchId: batch.id,
+      catalogueId: batch.catalogueId, catalogueCollectedAt: comparisonCatalogue.collectedAt,
+      catalogueMinimumReviewCount: comparisonCatalogue.minimumReviewCount, reviewCountScope: comparisonCatalogue.reviewCountScope,
+      tag: batch.tag, minimumReviewCount: batch.minimumReviewCount, items: batch.items, rank,
+    });
+    shuffleArray(batch.items);
+    setBatch(batch);
+    recordingAvailableAt = Date.now() + 1500;
+    renderPage();
+    showStatus("Ranking recorded. Pass to the next rater.", true);
+  } catch (error) { showStatus(error.message); }
+}
+
+async function onLoadSample() {
+  if (sampleLoadInProgress || !comparisonCatalogue) return;
+  sampleLoadInProgress = true;
+  const operationRevision = ++sampleOperationRevision;
+  disableComparisonButtons();
+  showStatus("Choosing games from the catalogue…");
+  try {
+    const settings = getSettings();
+    if (!settings || !settings.description || !settings.tag) throw new Error("Enter your description and genre in Settings.");
+    const games = await fetchGames(settings.tag, settings.minimumReviewCount);
+    if (operationRevision !== sampleOperationRevision) return;
+    const currentSettings = getSettings();
+    if (!batchMatchesSamplingSettings(settings, currentSettings) || settings.description !== currentSettings.description) {
+      throw new Error("Settings changed while the sample was loading. Load a new sample.");
+    }
+    const excludedGameIds = getExcludedGameIds();
+    if (games.some(game => excludedGameIds.includes(game.id))) throw new Error("Excluded games changed while the sample was loading. Load a new sample.");
+    games.push({ id: hashStr(currentSettings.description), text: currentSettings.description });
+    const batch = {
+      id: createId("batch"), catalogueId: comparisonCatalogue.catalogueId, tag: settings.tag,
+      minimumReviewCount: settings.minimumReviewCount, items: shuffleArray(games),
+    };
+    setBatch(batch);
+    sampleEditMode = false;
+  } catch (error) {
+    if (operationRevision === sampleOperationRevision) {
+      clearBatch();
+      sampleLoadInProgress = false;
+      renderPage(error.message);
+      return;
+    }
+  } finally {
+    if (operationRevision === sampleOperationRevision) sampleLoadInProgress = false;
+  }
+  if (operationRevision === sampleOperationRevision) renderPage();
+}
+
+async function onExcludeGame(gameId) {
+  if (!sampleEditMode || sampleLoadInProgress) return;
+  const operationRevision = ++sampleOperationRevision;
+  try {
+    const settings = getSettings();
+    const batch = getBatch();
+    if (!batch || batch.id !== currentlyDisplayedBatchId ||
+        !batchMatchesCatalogueSettings(batch, settings, comparisonCatalogue)) {
+      renderPage("The sample changed. Review it before excluding a game.");
+      return;
+    }
+    const excludedGame = batch.items.find(item => item.id === gameId && !isCandidateDescription(item));
+    if (!excludedGame) throw new Error("Your own description cannot be excluded.");
+    excludeSteamGame(gameId, comparisonCatalogue);
+    clearBatch();
+    sampleLoadInProgress = true;
+    disableComparisonButtons();
+    showStatus("Game excluded from future samples. Choosing a replacement…");
+    const remainingItems = batch.items.filter(item => item.id !== gameId);
+    const replacementGames = await fetchGames(settings.tag, settings.minimumReviewCount,
+      remainingItems.filter(item => !isCandidateDescription(item)).map(item => item.id), 1);
+    if (operationRevision !== sampleOperationRevision) return;
+    const currentSettings = getSettings();
+    if (!batchMatchesSamplingSettings(settings, currentSettings) || settings.description !== currentSettings.description) {
+      throw new Error("The game is excluded. Settings changed while choosing a replacement; load a new sample.");
+    }
+    const replacementBatch = {
+      ...batch, id: createId("batch"), items: shuffleArray([...remainingItems, ...replacementGames]),
+    };
+    if (!batchMatchesCatalogueSettings(replacementBatch, currentSettings, comparisonCatalogue)) {
+      throw new Error("The game is excluded. Exclusions changed while choosing a replacement; load a new sample.");
+    }
+    setBatch(replacementBatch);
+    sampleLoadInProgress = false;
+    renderPage("Game excluded and replaced. The ranking has been reset. You can restore excluded games in Settings.");
+  } catch (error) {
+    if (operationRevision === sampleOperationRevision) {
+      sampleLoadInProgress = false;
+      renderPage(error.message);
+    }
+  } finally {
+    if (operationRevision === sampleOperationRevision) sampleLoadInProgress = false;
+  }
+}
+
+function onNewBatch() {
+  ++sampleOperationRevision;
+  sampleLoadInProgress = false;
+  sampleEditMode = false;
+  clearBatch();
+  renderPage();
+}
+
+window.addEventListener("storage", event => {
+  if (event.key !== null && ![SETTINGS_STORAGE_KEY, BATCH_STORAGE_KEY, EXCLUDED_GAMES_STORAGE_KEY].includes(event.key)) return;
+  ++sampleOperationRevision;
+  sampleLoadInProgress = false;
+  sampleEditMode = false;
+  renderPage("Settings, the sample, or exclusions changed in another tab. Review the current sample before recording.");
+});
+
+init();
+</script>
+</body>
+</html>
