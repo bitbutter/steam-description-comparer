@@ -97,10 +97,42 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .footer-divider { border: 0; border-top: 1px solid var(--border); margin-top: 28px; }
 footer.page-note { padding-top: 20px; margin-top: 0; }
 
-.hero { text-align: center; padding: 40px 16px; }
-.hero h2 { font-size: 28px; margin-bottom: 12px; }
-.hero p { font-size: 16px; margin-bottom: 24px; }
-.hero-links { display: flex; flex-direction: column; gap: 12px; max-width: 300px; margin: 0 auto; }
+.hero { padding: 36px 0 28px; }
+.hero-kicker {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.hero h2 { font-size: 32px; line-height: 1.2; margin-bottom: 14px; max-width: 580px; }
+.hero-intro { font-size: 17px; line-height: 1.65; margin-bottom: 24px; max-width: 640px; }
+.suggested-use {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  padding: 24px;
+}
+.suggested-use > h3 { color: var(--text); font-size: 18px; font-weight: 600; margin-bottom: 18px; }
+.suggested-use-flow { display: grid; gap: 20px; list-style: none; }
+.suggested-use-flow li { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.suggested-use-step {
+  align-items: center;
+  background: rgba(74, 158, 255, .12);
+  border: 1px solid rgba(74, 158, 255, .28);
+  border-radius: 50%;
+  color: var(--accent);
+  display: inline-flex;
+  flex: 0 0 34px;
+  font-size: 14px;
+  font-weight: 700;
+  height: 34px;
+  justify-content: center;
+}
+.suggested-use-flow h4 { color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.4; margin-bottom: 5px; }
+.suggested-use-flow p { font-size: 14px; line-height: 1.55; margin-bottom: 0; }
+.hero-links { display: flex; flex-direction: column; gap: 12px; max-width: 320px; margin: 0 0 28px; }
 .empty-state { text-align: center; padding: 48px 16px; color: var(--text2); }
 .empty-state p { font-size: 15px; }
 
@@ -171,12 +203,15 @@ footer.page-note { padding-top: 20px; margin-top: 0; }
 
 @media (min-width: 600px) {
   .container { padding: 24px; }
-  .hero-links { flex-direction: row; max-width: none; }
+  .suggested-use-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 24px; }
 }
 @media (max-width: 480px) {
   header { align-items: flex-start; flex-direction: column; gap: 10px; }
   header nav { gap: 2px; }
   header nav a { padding: 5px 8px; }
+  .hero { padding-top: 24px; }
+  .hero h2 { font-size: 28px; }
+  .suggested-use { padding: 20px 18px; }
   .comparison-toolbar-actions { width: 100%; }
   .comparison-toolbar .btn { width: 100%; }
 }

@@ -487,6 +487,24 @@ test("public pages and dependencies use relative URLs and no private API endpoin
   }
 });
 
+test("homepage presents the suggested description-testing flow in order", () => {
+  const homepage = fs.readFileSync(path.join(staticDirectory, "index.html"), "utf8");
+  const flow = homepage.match(/<ol class="suggested-use-flow" role="list">([\s\S]*?)<\/ol>/);
+  assert.ok(flow);
+  const flowItems = [...flow[1].matchAll(/<li>([\s\S]*?)<\/li>/g)].map(match => match[1]);
+  assert.equal(flowItems.length, 4);
+  assert.deepEqual(flowItems.map(item => item.match(/<h4>([^<]+)<\/h4>/)?.[1]), [
+    "Enter your draft",
+    "Compare it in context",
+    "Ask other people to rank them",
+    "Revise against the same set",
+  ]);
+  assert.match(flowItems[1], /random set with four descriptions from Steam games in that genre/i);
+  assert.match(flowItems[2], /order all five/i);
+  assert.match(flowItems[3], /same ranking question against the same four games/i);
+  assert.match(homepage, /href="settings\.html"[^>]*>Start with your description<\/a>/);
+});
+
 
 
 test("a drag cannot save descriptions made ineligible by changed filters or exclusions", () => {
