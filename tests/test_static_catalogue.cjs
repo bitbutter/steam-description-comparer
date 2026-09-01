@@ -501,6 +501,7 @@ test("homepage presents the suggested description-testing flow in order", () => 
   ]);
   assert.match(flowItems[1], /four descriptions from games under your selection/i);
   assert.match(flowItems[2], /order all five by how much each makes them want to learn more/i);
+  assert.doesNotMatch(flowItems[2], /Copy the A.E list without its source details/i);
   assert.match(flowItems[3], /same four games for the next ranking/i);
   assert.match(homepage, /href="settings\.html"[^>]*>Enter your draft<\/a>/);
 });
