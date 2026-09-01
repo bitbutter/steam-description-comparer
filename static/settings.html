@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Enter a Steam description draft, choose a Steam genre or tag, and set the minimum review count for its four comparison games.">
 <title>Settings - Steam Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div class="container">
@@ -13,29 +14,33 @@
     <a href="index.html">Home</a><a href="settings.html" aria-current="page">Settings</a><a href="compare.html">Compare</a>
   </nav></header>
   <div id="status-message" role="status" aria-live="polite"></div>
+  <section class="settings-intro" aria-labelledby="settings-intro-heading">
+    <h2 id="settings-intro-heading">Set up your comparison</h2>
+    <p>Enter your draft, then choose a Steam genre or tag and the minimum review count for the four comparison games. You can revise your draft against the same four games before drawing another set.</p>
+  </section>
   <div class="form-group">
-    <label for="description">Your game description</label>
-    <p>Paste the short description you want to compare with Steam games.</p>
+    <label for="description">Your description draft</label>
+    <p>Paste the short Steam description you want to test.</p>
     <textarea id="description" placeholder="A tactical deckbuilding roguelike where..." rows="5"></textarea>
   </div>
   <div class="form-group">
-    <label for="tag">Genre tag</label>
-    <p>Sample randomly from this genre in the saved catalogue. Games can belong to more than one genre.</p>
-    <select id="tag"><option value="">Loading genres…</option></select>
+    <label for="tag">Steam genre or tag</label>
+    <p>Choose a genre or tag that fits your game. The four comparison descriptions will come from games under your selection.</p>
+    <select id="tag"><option value="">Loading Steam genres and tags…</option></select>
   </div>
   <div class="form-group">
     <label for="minimum-review-count">Minimum Steam reviews</label>
-    <p>50 or higher.</p>
+    <p>Only include games that had at least this many Steam reviews when the catalogue was collected. The minimum is 50.</p>
     <input id="minimum-review-count" type="number" min="50" step="1" value="50" required>
     <p id="eligible-game-count" class="page-note" aria-live="polite"></p>
   </div>
   <div class="actions"><button id="save-btn" class="btn btn-primary btn-block" disabled>Compare descriptions</button></div>
   <section class="settings-section" aria-labelledby="exclusions-heading">
     <h2 id="exclusions-heading">Excluded games</h2>
-    <p>Choose Reveal information on the Compare screen to show the Exclude buttons. An excluded game stays out of future samples in this browser until you restore it here.</p>
+    <p>Choose Show source details on Compare to reveal the Exclude buttons. An excluded game stays out of future sets in this browser until you restore it here.</p>
     <div id="excluded-games-list"></div>
   </section>
-  <p class="page-note">Your description and exclusions are stored locally in your browser and aren't uploaded by this tool. Clearing site data removes them.</p>
+  <p class="page-note">Your draft and exclusions stay in this browser. Clearing site data removes them.</p>
   <p class="page-note">This site serves a fixed catalogue, not live Steam data. Steam descriptions belong to their respective owners. This tool is not affiliated with Valve or Steam. The website host receives normal page requests.</p>
   <hr class="footer-divider">
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>. <a href="steam-data.html">Steam data</a></p></footer>
@@ -54,12 +59,12 @@ function renderEligibleGameCount() {
   if (!settingsCatalogue) return;
   const genreId = document.getElementById("tag").value;
   const countElement = document.getElementById("eligible-game-count");
-  if (!genreId) { countElement.textContent = "Select a genre to see how many games are available."; return; }
+  if (!genreId) { countElement.textContent = "Select a Steam genre or tag to see how many games are available."; return; }
   try {
     const minimumReviewCount = document.getElementById("minimum-review-count").valueAsNumber;
     const eligibleCount = getEligibleGames(settingsCatalogue, genreId, minimumReviewCount).length;
-    countElement.textContent = eligibleCount.toLocaleString() + " games match this minimum and your exclusions." +
-      (eligibleCount < 4 ? " A sample needs at least four." : "");
+    countElement.textContent = eligibleCount.toLocaleString() + " games are available under this selection after applying the review minimum and exclusions." +
+      (eligibleCount < 4 ? " A comparison needs at least four." : "");
   } catch (error) { countElement.textContent = error.message; }
 }
 
@@ -81,16 +86,16 @@ function renderExcludedGames() {
         restoreSteamGame(button.dataset.gameId);
         renderExcludedGames();
         renderEligibleGameCount();
-        showSettingsStatus("Game restored to future samples.", true);
+        showSettingsStatus("This game is eligible for future sets again.", true);
       } catch (error) { showSettingsStatus(error.message); }
     }));
     document.getElementById("restore-all-btn").addEventListener("click", () => {
-      if (!confirm("Restore every excluded game to future samples in this browser?")) return;
+      if (!confirm("Make every excluded game eligible for future sets in this browser?")) return;
       try {
         restoreAllSteamGames();
         renderExcludedGames();
         renderEligibleGameCount();
-        showSettingsStatus("All excluded games restored.", true);
+        showSettingsStatus("All excluded games are eligible for future sets again.", true);
       } catch (error) { showSettingsStatus(error.message); }
     });
   } catch (error) {
@@ -112,7 +117,7 @@ async function init() {
     }
     settingsCatalogue = await fetchCatalogue();
     const genres = await fetchTags();
-    genreElement.innerHTML = '<option value="">Select a genre…</option>';
+    genreElement.innerHTML = '<option value="">Select a Steam genre or tag…</option>';
     for (const genre of genres) {
       const option = document.createElement("option");
       option.value = genre.id;
@@ -134,7 +139,7 @@ async function init() {
       const description = descriptionElement.value.trim();
       const tag = genreElement.value;
       if (!description) throw new Error("Please enter a description.");
-      if (!tag) throw new Error("Please select a genre tag.");
+      if (!tag) throw new Error("Please select a Steam genre or tag.");
       const minimumReviewCount = minimumElement.valueAsNumber;
       validateMinimumReviewCount(minimumReviewCount);
       const previousSettings = readComparisonSettingsForEditing();
@@ -144,7 +149,7 @@ async function init() {
       setSettings(nextSettings);
       if (filtersChanged || eligibleCount < 4) clearComparisonSample();
       if (eligibleCount < 4) {
-        showSettingsStatus("Fewer than four games are eligible. Lower the review minimum, choose another genre, or restore excluded games.");
+        showSettingsStatus("Fewer than four games are eligible. Lower the review minimum, choose another Steam genre or tag, or restore excluded games.");
         renderEligibleGameCount();
       } else {
         window.location.href = "compare.html";

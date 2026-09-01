@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Compare - Steam Comparer</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div class="container comparison-container">
@@ -19,19 +19,19 @@
   </header>
   <div class="comparison-toolbar">
     <div>
-      <h2>Compare descriptions</h2>
-      <p>Drag descriptions to rearrange them.</p>
+      <h2>Ask someone to rank A–E</h2>
+      <p>Have them order the descriptions by how much each makes them want to learn more. Drag the cards into their order, or copy the list to share.</p>
     </div>
     <div class="comparison-toolbar-actions">
-      <button id="resample-steam-games-btn" class="btn btn-primary" disabled>Resample Steam games</button>
-      <button id="reveal-information-btn" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="description-list" disabled>Reveal information</button>
-      <button id="copy-all-text-btn" class="btn btn-secondary" type="button" disabled>Copy all as text</button>
+      <button id="resample-steam-games-btn" class="btn btn-primary" disabled>Draw another set</button>
+      <button id="reveal-information-btn" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="description-list" disabled>Show source details</button>
+      <button id="copy-all-text-btn" class="btn btn-secondary" type="button" disabled>Copy A–E list</button>
     </div>
   </div>
   <div id="status-message" role="status" aria-live="polite"></div>
   <p id="eligible-game-count" class="comparison-pool-note"></p>
   <main id="main-area"><p>Loading the game catalogue…</p></main>
-  <p class="page-note">Your description, arrangement, and exclusions are stored in your browser and aren't uploaded by this tool. Clearing site data removes them.</p>
+  <p class="page-note">Your draft, card order and exclusions stay in this browser. Clearing site data removes them.</p>
   <hr class="footer-divider">
   <footer class="page-note"><p>Made by Tomasz Kaye, creator of <a href="https://store.steampowered.com/app/2712670/Axe_Ghost/">Axe Ghost</a>. <a href="steam-data.html">Steam data</a></p></footer>
 </div>
@@ -63,8 +63,7 @@ function clearDisplayedDescriptions() {
 function showUnavailableComparison(message) {
   clearDisplayedDescriptions();
   document.getElementById("eligible-game-count").textContent = "";
-  document.getElementById("main-area").innerHTML = '<div class="empty-state"><h3>No comparison sample to show</h3>' +
-    '<p>Use Resample Steam games to try again. You can change the review minimum or genre, or restore excluded games, in <a href="settings.html">Settings</a>.</p></div>';
+  document.getElementById("main-area").innerHTML = '<div class="empty-state"><h3>No descriptions to compare</h3></div>';
   showComparisonStatus(message);
 }
 
@@ -83,7 +82,7 @@ async function init() {
 function readUsableComparisonSettings() {
   const settings = getSettings();
   if (!settings || !settings.description || !settings.description.trim() || !settings.tag) {
-    throw new Error("Enter your description and select a genre in Settings.");
+    throw new Error("Enter your description and select a Steam genre or tag in Settings.");
   }
   validateMinimumReviewCount(settings.minimumReviewCount);
   return settings;
@@ -122,7 +121,7 @@ function renderComparisonPage(message = "", revealInformation = false) {
     const genre = comparisonCatalogue.genres.find(genre => String(genre.id) === sample.genreId);
     const eligibleCount = getEligibleGames(comparisonCatalogue, settings.tag, settings.minimumReviewCount).length;
     document.getElementById("eligible-game-count").textContent = genre.name + " · " +
-      eligibleCount.toLocaleString() + " games match your settings and exclusions";
+      eligibleCount.toLocaleString() + " games are available after applying your review minimum and exclusions";
     renderDescriptionCards(descriptions);
     currentlyDisplayedComparisonSample = {...sample, descriptionIds: [...sample.descriptionIds]};
     setComparisonInformationRevealed(revealInformation);
@@ -136,7 +135,7 @@ function setComparisonInformationRevealed(revealed) {
   comparisonInformationRevealed = revealed && Boolean(currentlyDisplayedComparisonSample);
   const button = document.getElementById("reveal-information-btn");
   button.disabled = !currentlyDisplayedComparisonSample;
-  button.textContent = comparisonInformationRevealed ? "Hide information" : "Reveal information";
+  button.textContent = comparisonInformationRevealed ? "Hide source details" : "Show source details";
   button.setAttribute("aria-expanded", String(comparisonInformationRevealed));
   document.querySelectorAll(".steam-game-information, .exclude-game-btn").forEach(element => {
     element.hidden = !comparisonInformationRevealed;
@@ -170,7 +169,7 @@ async function copyDisplayedDescriptionsToClipboard() {
     }
     await navigator.clipboard.writeText(comparisonText);
     if (currentlyDisplayedComparisonSample === sampleAtCopy) {
-      showComparisonStatus("Copied all five descriptions to the clipboard.", true);
+      showComparisonStatus("Copied A–E to the clipboard.", true);
     }
   } catch (error) {
     if (currentlyDisplayedComparisonSample === sampleAtCopy) {
@@ -184,10 +183,10 @@ async function copyDisplayedDescriptionsToClipboard() {
 }
 
 function renderDescriptionCards(descriptions) {
-  let html = '<div id="description-list" class="description-column" aria-label="Descriptions to compare">';
+  let html = '<div id="description-list" class="description-column" aria-label="A–E descriptions to rank">';
   for (const [index, description] of descriptions.entries()) {
     html += '<article class="description-card" data-id="' + escapeHtml(description.id) + '">';
-    html += '<div class="description-card-heading"><span class="description-drag-handle" aria-hidden="true" title="Drag to rearrange">&#x2630;</span>' +
+    html += '<div class="description-card-heading"><span class="description-drag-handle" aria-hidden="true" title="Drag to rank">&#x2630;</span>' +
       '<h3 class="description-card-label">' + String.fromCharCode(65 + index) + '</h3></div>';
     html += '<p class="description-text">' + escapeHtml(description.text) + '</p>';
     if (description.id !== YOUR_DESCRIPTION_ID) {
@@ -249,14 +248,14 @@ function onDescriptionsReordered() {
     const savedSample = getComparisonSample();
     if (!comparisonSampleMatchesSettings(savedSample, settings, comparisonCatalogue) ||
         !samplesHaveSameDescriptionOrder(savedSample, currentlyDisplayedComparisonSample)) {
-      renderComparisonPage("The sample changed in another tab. Its current arrangement is shown here.");
+      renderComparisonPage("The comparison changed in another tab. Its current order is shown here.");
       return;
     }
     const reorderedDescriptionIds = descriptionSortable.toArray();
     if (reorderedDescriptionIds.length !== savedSample.descriptionIds.length ||
         new Set(reorderedDescriptionIds).size !== reorderedDescriptionIds.length ||
         reorderedDescriptionIds.some(id => !savedSample.descriptionIds.includes(id))) {
-      renderComparisonPage("The arrangement was not saved: all five descriptions must stay in the sample.");
+      renderComparisonPage("The arrangement was not saved: all five descriptions must stay in the comparison.");
       return;
     }
     const reorderedSample = {...savedSample, descriptionIds: reorderedDescriptionIds};
@@ -290,11 +289,11 @@ function onExcludeGame(gameId) {
     const savedSample = getComparisonSample();
     if (!comparisonSampleMatchesSettings(savedSample, settings, comparisonCatalogue) ||
         !samplesHaveSameDescriptionOrder(savedSample, currentlyDisplayedComparisonSample)) {
-      renderComparisonPage("The sample changed. Check the current descriptions before excluding a game.");
+      renderComparisonPage("The comparison changed. Check the current descriptions before excluding a game.");
       return;
     }
     if (gameId === YOUR_DESCRIPTION_ID || !savedSample.descriptionIds.includes(gameId)) {
-      throw new Error("Only a Steam game in the current sample can be excluded.");
+      throw new Error("Only a Steam game in the current comparison can be excluded.");
     }
     excludeSteamGame(gameId, comparisonCatalogue);
     exclusionSaved = true;
@@ -304,7 +303,7 @@ function onExcludeGame(gameId) {
     const updatedSample = {...savedSample,
       descriptionIds: savedSample.descriptionIds.map(id => id === gameId ? replacement.id : id)};
     saveComparisonSample(updatedSample);
-    renderComparisonPage("Game excluded and replaced. You can restore it in Settings.", comparisonInformationRevealed);
+    renderComparisonPage("Game excluded and replaced. Restore it in Settings.", comparisonInformationRevealed);
   } catch (error) {
     if (exclusionSaved) clearComparisonSample();
     showUnavailableComparison((exclusionSaved ? "The game is excluded. " : "") + error.message);
@@ -313,7 +312,7 @@ function onExcludeGame(gameId) {
 
 window.addEventListener("storage", event => {
   if (event.key === null || [SETTINGS_STORAGE_KEY, COMPARISON_SAMPLE_STORAGE_KEY, EXCLUDED_GAMES_STORAGE_KEY].includes(event.key)) {
-    renderComparisonPage("Settings, the sample, or exclusions changed in another tab.");
+    renderComparisonPage("The comparison changed in another tab.");
   }
 });
 

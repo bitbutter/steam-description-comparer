@@ -136,6 +136,8 @@ footer.page-note { padding-top: 20px; margin-top: 0; }
 .empty-state { text-align: center; padding: 48px 16px; color: var(--text2); }
 .empty-state p { font-size: 15px; }
 
+.settings-intro { margin-bottom: 28px; }
+.settings-intro p { max-width: 640px; }
 .settings-section { margin-top: 36px; padding-top: 24px; border-top: 1px solid var(--border); }
 .excluded-games { list-style: none; margin: 16px 0; }
 .excluded-games li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }

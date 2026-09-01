@@ -122,7 +122,7 @@ test("the catalogue is fetched once with a project-relative URL", async () => {
   assert.deepEqual(fetchUrls, ["catalogue.json"]);
 });
 
-test("genre selection, valid review minimums, and unique descriptions use the saved catalogue", async () => {
+test("Steam tag selection, valid review minimums, and unique descriptions use the saved catalogue", async () => {
   const {context} = browserContext();
   const catalogue = await context.fetchCatalogue();
   const filtered = context.chooseSteamGames(catalogue, 1, 100);
@@ -130,7 +130,7 @@ test("genre selection, valid review minimums, and unique descriptions use the sa
   assert.equal(new Set(filtered.map(game => game.id)).size, 4);
   assert.ok(filtered.every(game => game.reviews >= 100 && game.steamTagIds.includes(19)));
   assert.equal(context.getEligibleGames(catalogue, 1, 50).length, 6);
-  assert.throws(() => context.getEligibleGames(catalogue, 999, 50), /selected genre/);
+  assert.throws(() => context.getEligibleGames(catalogue, 999, 50), /selected Steam genre or tag/);
   for (const minimum of [-1, 0, 0.5, 1, 25, 49, 49.5, 50.5, "50", true, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(() => context.validateMinimumReviewCount(minimum), /whole number/);
   }
@@ -257,7 +257,7 @@ test("sample storage requires all five unique ids and an explicit sample definit
     storage.set(SAMPLE_KEY, previousSample);
   }
   storage.set(SAMPLE_KEY, "malformed JSON");
-  assert.throws(() => context.getComparisonSample(), /sample/i);
+  assert.throws(() => context.getComparisonSample(), /random set/i);
   assert.equal(storage.get(SAMPLE_KEY), "malformed JSON");
 });
 
@@ -387,7 +387,7 @@ test("candidate exclusion cannot change the sample or the excluded-games list", 
   context.onExcludeGame(YOUR_DESCRIPTION_ID);
   assert.equal(context.getExcludedGameIds().length, 0);
   assert.equal(storage.get(SAMPLE_KEY), saved);
-  assert.match(elements.get("status-message").innerHTML, /Only a Steam game in the current sample/);
+  assert.match(elements.get("status-message").innerHTML, /Only a Steam game in the current comparison/);
 });
 
 test("requesting a new sample keeps the configured description and writes no ranking records", () => {
@@ -495,14 +495,44 @@ test("homepage presents the suggested description-testing flow in order", () => 
   assert.equal(flowItems.length, 4);
   assert.deepEqual(flowItems.map(item => item.match(/<h4>([^<]+)<\/h4>/)?.[1]), [
     "Enter your draft",
-    "Compare it in context",
+    "Compare it with four games",
     "Ask other people to rank them",
     "Revise against the same set",
   ]);
-  assert.match(flowItems[1], /random set with four descriptions from Steam games in that genre/i);
-  assert.match(flowItems[2], /order all five/i);
-  assert.match(flowItems[3], /same ranking question against the same four games/i);
-  assert.match(homepage, /href="settings\.html"[^>]*>Start with your description<\/a>/);
+  assert.match(flowItems[1], /four descriptions from games under your selection/i);
+  assert.match(flowItems[2], /order all five by how much each makes them want to learn more/i);
+  assert.match(flowItems[3], /same four games for the next ranking/i);
+  assert.match(homepage, /href="settings\.html"[^>]*>Enter your draft<\/a>/);
+});
+
+test("Settings and Compare carry the Steam genre-or-tag ranking flow", () => {
+  const settingsPage = fs.readFileSync(path.join(staticDirectory, "settings.html"), "utf8");
+  const comparePage = fs.readFileSync(path.join(staticDirectory, "compare.html"), "utf8");
+  assert.match(settingsPage, /Set up your comparison/);
+  assert.match(settingsPage, /Steam genre or tag and the minimum review count/);
+  assert.match(settingsPage, /same four games/);
+  assert.match(settingsPage, />Steam genre or tag</);
+  assert.doesNotMatch(settingsPage, /Loading genres|choose another Steam tag|Select a Steam tag/);
+  assert.match(comparePage, /Ask someone to rank A.E/);
+  assert.match(comparePage, /by how much each makes them want to learn more/);
+  assert.match(comparePage, /Show source details/);
+  assert.match(comparePage, /Copy A.E list/);
+  assert.match(comparePage, /Draw another set/);
+  assert.doesNotMatch(comparePage, /Follow the message above|current sample|The sample changed/);
+});
+
+test("README preserves the ranking criterion and repeat-draw qualification", () => {
+  const readme = fs.readFileSync(path.join(staticDirectory, "..", "README.md"), "utf8");
+  assert.match(readme, /rank by how much each makes them want to learn more/);
+  assert.match(readme, /A new set can include games you have seen before/);
+});
+
+test("Steam data notice preserves the required disclaimer and official terms link", () => {
+  const steamDataPage = fs.readFileSync(path.join(staticDirectory, "steam-data.html"), "utf8");
+  assert.match(steamDataPage, /provided as-is, with possible faults or interruptions/);
+  assert.match(steamDataPage, /Valve and its suppliers are not liable/);
+  assert.match(steamDataPage, /your sole remedy is to stop using the Steam data/);
+  assert.match(steamDataPage, /href="https:\/\/steamcommunity\.com\/dev\/apiterms"/);
 });
 
 
@@ -554,7 +584,7 @@ test("a settings change during catalogue loading keeps the old draft from overwr
   for (const listener of storageListeners) listener({key: SETTINGS_KEY});
   releaseResponse({ok: true, json: async () => catalogueFixture()});
   await initialization;
-  assert.match(elements.get("eligible-game-count").textContent, /6 games match this minimum and your exclusions/);
+  assert.match(elements.get("eligible-game-count").textContent, /6 games are available under this selection after applying the review minimum and exclusions/);
   assert.match(elements.get("excluded-games-list").innerHTML, /No games excluded/);
   assert.equal(elements.get("tag").value, "1");
   assert.equal(elements.get("save-btn").disabled, true);
@@ -565,7 +595,7 @@ test("a settings change during catalogue loading keeps the old draft from overwr
   assert.equal(context.window.location.href, "");
 });
 
-test("same-catalogue corrupt sample references fail visibly and stay saved until explicit Resample Steam games", () => {
+test("same-catalogue corrupt sample references fail visibly and stay saved until an explicit new set", () => {
   for (const mutate of [
     sample => { sample.descriptionIds[0] = "steam_999"; },
     sample => { sample.descriptionIds[0] = "steam_7"; },
@@ -584,14 +614,14 @@ test("same-catalogue corrupt sample references fail visibly and stay saved until
     assert.equal(storage.get(SAMPLE_KEY), saved);
     assert.equal(storageWrites.length, beforeWrites);
     assert.equal(storageDeletes.length, beforeDeletes);
-    assert.match(elements.get("status-message").innerHTML, /comparison|sample|genre|minimum/i);
-    assert.match(elements.get("main-area").innerHTML, /Resample Steam games/);
+    assert.match(elements.get("status-message").innerHTML, /Draw another set/);
+    assert.match(elements.get("main-area").innerHTML, /No descriptions to compare/);
     assert.equal(vm.runInContext("currentlyDisplayedComparisonSample", context), null);
     context.resampleSteamGames();
     const replacement = context.getComparisonSample();
     assert.equal(context.comparisonSampleMatchesSettings(replacement, context.getSettings(), catalogueFixture()), true);
     assert.notEqual(storage.get(SAMPLE_KEY), saved);
-    assert.doesNotMatch(elements.get("main-area").innerHTML, /No comparison sample to show/);
+    assert.doesNotMatch(elements.get("main-area").innerHTML, /No descriptions to compare/);
   }
 });
 
@@ -610,7 +640,7 @@ test("review minima must be safe whole integers of at least fifty across setting
     assert.throws(() => context.setSettings({...settingsFixture(), minimumReviewCount: minimum}), /review minimum is invalid|50 or higher/);
     assert.throws(() => context.getEligibleGames(catalogueFixture(), 1, minimum), /50 or higher/);
     assert.throws(() => context.createComparisonSample(catalogueFixture(), {...settingsFixture(), minimumReviewCount: minimum}), /review minimum is invalid|50 or higher/);
-    assert.throws(() => context.saveComparisonSample({...sampleFixture(), minimumReviewCount: minimum}), /sample is invalid/);
+    assert.throws(() => context.saveComparisonSample({...sampleFixture(), minimumReviewCount: minimum}), /random set is invalid/);
     assert.equal(storage.get(SETTINGS_KEY), savedSettings);
     assert.equal(storage.get(SAMPLE_KEY), savedSample);
   }
@@ -635,7 +665,7 @@ test("previously saved minima below fifty stay editable but cannot be used until
       assert.equal(elements.get("save-btn").disabled, false);
       assert.match(elements.get("eligible-game-count").textContent, /50 or higher/);
       assert.throws(() => context.getSettings(), /50 or higher/);
-      assert.throws(() => context.getComparisonSample(), /sample is invalid/);
+      assert.throws(() => context.getComparisonSample(), /random set is invalid/);
       assert.deepEqual([...storage], previousStorage);
       assert.equal(storageWrites.length, 0);
       assert.equal(storageDeletes.length, 0);
@@ -715,19 +745,19 @@ test("revealing and hiding information leaves the sample and arrangement untouch
   context.onRevealInformation();
   assert.ok(informationElements.every(element => element.hidden === false));
   assert.equal(browser.elements.get("reveal-information-btn").getAttribute("aria-expanded"), "true");
-  assert.equal(browser.elements.get("reveal-information-btn").textContent, "Hide information");
+  assert.equal(browser.elements.get("reveal-information-btn").textContent, "Hide source details");
   assert.equal(storage.get(SAMPLE_KEY), savedSample);
   assert.equal(storageWrites.length, beforeWrites);
   assert.equal(context.lastRenderMessage, undefined);
   context.onRevealInformation();
   assert.ok(informationElements.every(element => element.hidden === true));
   assert.equal(browser.elements.get("reveal-information-btn").getAttribute("aria-expanded"), "false");
-  assert.equal(browser.elements.get("reveal-information-btn").textContent, "Reveal information");
+  assert.equal(browser.elements.get("reveal-information-btn").textContent, "Show source details");
   assert.equal(storage.get(SAMPLE_KEY), savedSample);
   assert.equal(storageWrites.length, beforeWrites);
 });
 
-test("Resample Steam games hides previously revealed information and shuffles the candidate position", () => {
+test("a new random draw hides previously revealed information and shuffles the candidate position", () => {
   const browser = browserContext({compare: true, realComparisonRenderer: true});
   const {context, elements} = browser;
   seedComparison(context);
@@ -815,7 +845,7 @@ test("copy exports only the displayed A-E descriptions without changing the samp
     assert.equal(storageWrites.length, beforeWrites);
     assert.equal(storageDeletes.length, beforeDeletes);
     assert.equal(vm.runInContext("comparisonInformationRevealed", context), revealed);
-    assert.match(elements.get("status-message").innerHTML, /Copied all five descriptions/);
+    assert.match(elements.get("status-message").innerHTML, /Copied A–E to the clipboard/);
     assert.equal(elements.get("copy-all-text-btn").disabled, false);
   }
 });
@@ -829,7 +859,7 @@ test("copy reports unavailable or blocked clipboard access without claiming succ
     context.navigator = navigator;
     await context.copyDisplayedDescriptionsToClipboard();
     assert.match(elements.get("status-message").innerHTML, /unavailable|blocked/);
-    assert.doesNotMatch(elements.get("status-message").innerHTML, /Copied all five/);
+    assert.doesNotMatch(elements.get("status-message").innerHTML, /Copied A–E/);
     assert.equal(elements.get("copy-all-text-btn").disabled, false);
   }
 });
@@ -868,6 +898,6 @@ test("a pending copy prevents duplicates and cannot claim the replacement sample
   assert.equal(elements.get("copy-all-text-btn").disabled, true);
   finishCopy();
   await copying;
-  assert.doesNotMatch(elements.get("status-message").innerHTML, /Copied all five/);
+  assert.doesNotMatch(elements.get("status-message").innerHTML, /Copied A–E/);
   assert.equal(elements.get("copy-all-text-btn").disabled, false);
 });

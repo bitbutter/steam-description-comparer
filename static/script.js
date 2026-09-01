@@ -21,10 +21,10 @@ function validateSavedSettingsStructure(settings) {
       typeof settings.description !== "string" || !settings.description.trim() ||
       !["string", "number"].includes(typeof settings.tag) ||
       !/^[1-9][0-9]*$/.test(String(settings.tag)) || !Number.isSafeInteger(Number(settings.tag))) {
-    throw new Error("The saved description or genre is invalid. Check your settings.");
+    throw new Error("The saved description or selected Steam genre or tag is invalid. Clear this site's stored data in your browser, then reload.");
   }
   if (!Number.isSafeInteger(settings.minimumReviewCount) || settings.minimumReviewCount < 0) {
-    throw new Error("The saved review minimum is invalid. Settings have not been changed.");
+    throw new Error("The saved review minimum is invalid. Clear this site's stored data in your browser, then reload.");
   }
 }
 
@@ -38,7 +38,7 @@ function readComparisonSettingsForEditing() {
   if (serializedSettings === null) return null;
   let settings;
   try { settings = JSON.parse(serializedSettings); }
-  catch { throw new Error("Saved settings could not be read. They have not been changed."); }
+  catch { throw new Error("Saved settings could not be read. Clear this site's stored data in your browser, then reload."); }
   validateSavedSettingsStructure(settings);
   return settings;
 }
@@ -70,7 +70,7 @@ function isComparisonSampleStructureValid(sample) {
 
 function validateComparisonSampleStructure(sample) {
   if (!isComparisonSampleStructureValid(sample)) {
-    throw new Error("The saved comparison sample is invalid. Choose Resample Steam games to replace it.");
+    throw new Error("The saved random set is invalid. Choose Draw another set to replace it.");
   }
 }
 
@@ -79,7 +79,7 @@ function getComparisonSample() {
   if (serializedSample === null) return null;
   let sample;
   try { sample = JSON.parse(serializedSample); }
-  catch { throw new Error("The saved comparison sample could not be read. Choose Resample Steam games to replace it."); }
+  catch { throw new Error("The saved random set could not be read. Choose Draw another set to replace it."); }
   validateComparisonSampleStructure(sample);
   return sample;
 }
@@ -102,16 +102,16 @@ function comparisonSampleMatchesSettings(sample, settings, catalogue) {
 
 function comparisonGames(catalogue, sample) {
   validateComparisonSampleStructure(sample);
-  if (sample.catalogueId !== catalogue.catalogueId) throw new Error("The comparison sample belongs to another catalogue.");
+  if (sample.catalogueId !== catalogue.catalogueId) throw new Error("The saved comparison belongs to another catalogue.");
   const genre = catalogue.genres.find(genre => String(genre.id) === sample.genreId);
-  if (!genre) throw new Error("The saved comparison genre is missing from the catalogue. Choose Resample Steam games to replace it.");
+  if (!genre) throw new Error("The saved Steam genre or tag is missing from the catalogue. Choose Draw another set to replace it.");
   const genreGameIds = new Set(genre.gameIds);
   const gamesById = new Map(catalogue.games.map(game => [game.id, game]));
   return sample.descriptionIds.filter(id => id !== YOUR_DESCRIPTION_ID).map(id => {
     const game = gamesById.get(id);
-    if (!game) throw new Error("The comparison sample contains a game missing from the catalogue. Choose Resample Steam games to replace it.");
+    if (!game) throw new Error("The saved random set contains a game missing from the catalogue. Choose Draw another set to replace it.");
     if (!genreGameIds.has(id) || game.reviews < sample.minimumReviewCount) {
-      throw new Error("The comparison sample does not match its saved genre or review minimum. Choose Resample Steam games to replace it.");
+      throw new Error("The saved random set does not match the current comparison settings. Choose Draw another set to replace it.");
     }
     return game;
   });
@@ -151,10 +151,10 @@ function getExcludedGameIds() {
   if (storedExclusions === null) return [];
   let gameIds;
   try { gameIds = JSON.parse(storedExclusions); }
-  catch { throw new Error("The excluded games list could not be read. No games will be sampled until it is repaired."); }
+  catch { throw new Error("The excluded games list could not be read. Clear this site's stored data in your browser, then reload."); }
   if (!Array.isArray(gameIds) || gameIds.some(id => typeof id !== "string" || !/^steam_[1-9][0-9]*$/.test(id)) ||
       new Set(gameIds).size !== gameIds.length) {
-    throw new Error("The excluded games list is invalid. No games will be sampled until it is repaired.");
+    throw new Error("The excluded games list is invalid. Clear this site's stored data in your browser, then reload.");
   }
   return gameIds;
 }
@@ -184,7 +184,7 @@ function validateCatalogue(catalogue) {
   if (typeof catalogue.collectedAt !== "string" || !Number.isFinite(Date.parse(catalogue.collectedAt))) fail("missing collection date");
   if (catalogue.minimumReviewCount !== 50 || catalogue.reviewCountScope !== REVIEW_COUNT_SCOPE) fail("unexpected review count definition");
   if (!Array.isArray(catalogue.games) || !catalogue.games.length) fail("no games");
-  if (!Array.isArray(catalogue.genres) || !catalogue.genres.length) fail("no genres");
+  if (!Array.isArray(catalogue.genres) || !catalogue.genres.length) fail("no Steam tags");
   const gamesById = new Map();
   for (const game of catalogue.games) {
     if (!game || !Number.isSafeInteger(game.appid) || game.appid <= 0 ||
@@ -201,11 +201,11 @@ function validateCatalogue(catalogue) {
   for (const genre of catalogue.genres) {
     if (!genre || !Number.isSafeInteger(genre.id) || genre.id <= 0 || genreIds.has(genre.id) ||
         typeof genre.name !== "string" || !genre.name.trim() ||
-        !Number.isSafeInteger(genre.steamTagId) || genre.steamTagId <= 0) fail("invalid or duplicate genre");
-    if (!Array.isArray(genre.gameIds) || !genre.gameIds.length || new Set(genre.gameIds).size !== genre.gameIds.length) fail("invalid genre game list");
+        !Number.isSafeInteger(genre.steamTagId) || genre.steamTagId <= 0) fail("invalid or duplicate Steam tag");
+    if (!Array.isArray(genre.gameIds) || !genre.gameIds.length || new Set(genre.gameIds).size !== genre.gameIds.length) fail("invalid Steam tag game list");
     for (const gameId of genre.gameIds) {
       const game = gamesById.get(gameId);
-      if (!game || !game.steamTagIds.includes(genre.steamTagId)) fail("genre membership does not match game tags");
+      if (!game || !game.steamTagIds.includes(genre.steamTagId)) fail("Steam tag membership does not match game tags");
     }
     genreIds.add(genre.id);
   }
@@ -226,7 +226,7 @@ async function fetchCatalogue() {
 function getEligibleGames(catalogue, genreId, minimumReviewCount, additionallyExcludedGameIds = []) {
   validateMinimumReviewCount(minimumReviewCount);
   const genre = catalogue.genres.find(genre => String(genre.id) === String(genreId));
-  if (!genre) throw new Error("The selected genre is not in this catalogue. Choose a genre in Settings.");
+  if (!genre) throw new Error("The selected Steam genre or tag is not in this catalogue. Choose a Steam genre or tag in Settings.");
   const excludedGameIds = new Set([...getExcludedGameIds(), ...additionallyExcludedGameIds]);
   const genreGameIds = new Set(genre.gameIds);
   return catalogue.games.filter(game => genreGameIds.has(game.id) &&
@@ -243,11 +243,11 @@ async function fetchTags() {
 
 function chooseSteamGames(catalogue, genreId, minimumReviewCount, additionallyExcludedGameIds = [], sampleSize = 4) {
   if (!Number.isSafeInteger(sampleSize) || sampleSize < 1 || sampleSize > 4) {
-    throw new Error("A sample must request between one and four Steam games.");
+    throw new Error("A random set must contain between one and four Steam games.");
   }
   const eligibleGames = getEligibleGames(catalogue, genreId, minimumReviewCount, additionallyExcludedGameIds);
   if (eligibleGames.length < sampleSize) {
-    throw new Error("Too few eligible games remain for a complete comparison. Lower the review minimum, choose another genre, or restore excluded games in Settings.");
+    throw new Error("Too few eligible games remain for a complete comparison. Lower the review minimum, choose another Steam genre or tag, or restore excluded games in Settings.");
   }
   return shuffleDescriptions(eligibleGames).slice(0, sampleSize).map(game => ({...game, steamTagIds: [...game.steamTagIds]}));
 }
