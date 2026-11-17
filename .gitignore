@@ -32,3 +32,4 @@
 /static/vendor/*
 !/static/vendor/sortable.min.js
 !/static/vendor/sortable.LICENSE.txt
+!/tools/draw_set.py
