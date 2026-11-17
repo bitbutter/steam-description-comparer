@@ -52,6 +52,7 @@ def main():
     ap.add_argument("--desc", help="your short description text")
     ap.add_argument("--file", help="read the description from a file instead")
     ap.add_argument("--seed", type=int, default=None, help="reproducible draw")
+    ap.add_argument("--position", choices=list("ABCDE"), default=None, help="seat for your draft (default: random of D or E, so wins are conservative against LLM position bias)")
     ap.add_argument("--list-genres", action="store_true")
     a = ap.parse_args()
 
@@ -81,8 +82,13 @@ def main():
 
     rng = random.Random(a.seed)
     picks = rng.sample(genre["gameIds"], 4)
-    entries = [("YOURS", desc)] + [("GAME", games[p]) for p in picks]
-    rng.shuffle(entries)
+    seat = a.position or rng.choice("DE")
+    order = list("ABCDE")
+    slots = {}
+    for s_ in [x for x in order if x != seat]:
+        slots[s_] = ("GAME", games[picks.pop()])
+    slots[seat] = ("YOURS", desc)
+    entries = [slots[x] for x in order]
 
     lines = []
     lines.append(
@@ -97,7 +103,7 @@ def main():
     print(block)
     print("=" * 60)
     print("PRIVATE KEY (do not paste):")
-    yours = "ABCDE"[next(i for i, (kind, _) in enumerate(entries) if kind == "YOURS")]
+    yours = seat
     print(f"  your draft is: {yours}")
     for label, (kind, payload) in zip("ABCDE", entries):
         if kind == "GAME":
